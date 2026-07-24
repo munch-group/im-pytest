@@ -4,16 +4,8 @@
 
 Some description...
 
-
+<!-- 
 | | |
 | --- | --- |
-| [functionname](functionname.qmd#munch_group_library.modulename.functionname) | The sum of two numbers. |
-
-## Some other section
-
-Some description...
-
-
-| | |
-| --- | --- |
-| [scriptname](scriptname.qmd#munch_group_library.modulename.scriptname) |  |
+| [functionname](functionname.qmd#im_pytest.functionname) | blah blah. |
+ -->

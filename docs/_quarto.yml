@@ -37,7 +37,7 @@ interlinks:
     #   inv: objects-test.txt
 
 website:
-  title: "munch-group-library"
+  title: "im-pytest"
   page-navigation: true
   navbar:
     left:
@@ -47,7 +47,7 @@ website:
       #   text: Gallery
     right:
       - icon: github
-        href: https://github.com/munch-group/munch-group-library/
+        href: https://github.com/munch-group/im-pytest/
   sidebar:
     - id: pages
       title: Get Started
@@ -76,7 +76,7 @@ format:
       theme: neutral 
 
 quartodoc:
-  package: munch-group-library
+  package: im-pytest
   style: pkgdown
   dir: api
   render_interlinks: true
@@ -88,16 +88,11 @@ quartodoc:
   sidebar: "api/_sidebar.yml"
   css: "api/_styles-quartodoc.css"
 
-  sections:
-    - title: Some section
-      package: munch_group_library.modulename
-      desc: |
-        Some description...
-      contents:
-        - functionname
-    - title: Some other section
-      package: munch_group_library.modulename
-      desc: |
-        Some description...
-      contents:
-        - scriptname
+  # sections:
+  #   - title: Some section
+  #     package: im_pytest
+  #     desc: |
+  #       Some description...
+  #     contents:
+  #       - functionname
+
