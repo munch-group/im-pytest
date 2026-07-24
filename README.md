@@ -1,58 +1,66 @@
+# im-pytest
 
-# Template repository for a library project
+A thin runner over **pytest** for the *Instructing Machines* course. One set of
+per-project test files is surfaced three escalating ways across the term, so
+testing grows from a hidden safety net into a tool students wield themselves.
 
-## Initial set up
+```python
+import im_pytest
 
-```bash
-pixi run init
+im_pytest.check("translationproject")   # friendly panel: ✓/✗ per function
 ```
 
-## Get updates to upstream fork
+## The three modes (one artifact)
 
-Add upstream if not already added
+1. **Hidden friendly runner** — `check("translationproject")` or the `%%test`
+   cell magic. Runs the project's bundled tests against the student's
+   `translationproject.py` and renders a beginner-friendly panel: a green ✓ or
+   red ✗ per function, the failing assertion, and a "functions not defined yet"
+   note. No test source, no traceback. For the early weeks, before students know
+   what a test is.
+2. **Raw pytest** — `pytest test_translationproject.py`. The *same* file, now run
+   with the real tool so students learn to read pytest's output. The `sol`
+   fixture, the `requires` marker and the not-defined banner are provided
+   automatically (this package registers a `pytest11` plugin).
+3. **Student-authored** — students write their own `assert`-based tests to
+   specify and validate AI-produced code, using the provided files as the model.
 
-```bash
-git remote add upstream https://github.com/munch-group/im-pytest.git
-```
-
-Fetch upstream changes
-
-```bash
-git fetch upstream
-```
-
-Either rebase your changes on top of upstream (cleaner history)
-
-```bash
-git rebase upstream/main
-```
-
-Or, merge upstream into your fork (preserves history)
+There is also a terminal entry point:
 
 ```bash
-git merge upstream/main
+pytest-check translationproject.py      # or: pytest-check translationproject
 ```
 
-If you want to see what's changed upstream before applying:
+## Writing a project test file
+
+Per-project test files are plain, idiomatic pytest. They receive `sol` (the
+student's solution module, imported fresh with the student's own `print` output
+suppressed) and mark each test with `requires` so an unwritten function is
+reported as "not defined" instead of crashing:
+
+```python
+import pytest
+
+@pytest.mark.requires("translate_codon")
+def test_translate_codon(sol):
+    assert sol.translate_codon("ATG") == "M"
+    assert sol.translate_codon("NNN") == "?"     # invalid codon
+    assert sol.translate_codon("atg") == "M"     # lowercase
+```
+
+`sol` resolves to `<project>.py` in the working folder (the module name is the
+test file name minus its `test_` prefix). Project test files and their data live
+in the **course repository** and are distributed to students as downloads; set
+`IM_PROJECT_TESTS` to point the runner at a shared folder instead of the working
+directory.
+
+## Development
 
 ```bash
-git log HEAD..upstream/main
+pixi run install-dev
+pixi run test
 ```
 
-See the actual diff
+## License
 
-```bash
-git diff HEAD...upstream/main
-```
-
-Then push your updated fork:
-
-```bash
-git push origin main
-```
-
-If you rebased and need to force push
-    
-```bash
-git push origin main --force-with-lease
-```
+MIT
