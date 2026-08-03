@@ -72,10 +72,9 @@ class Report:
                 if o.status != PASS and o.message:
                     lines.append(_indent(o.message))
             if self.undefined:
-                lines += ["", "*" * 57,
-                          "ATTENTION! These functions are not defined (yet):", ""]
-                lines += [f"\t{n}" for n in self.undefined]
-                lines += ["", "They are either misspelled or not written yet.", "*" * 57]
+                lines += ["", _red("Test script could not find the following functions,")]
+                lines += [_red("which are either misspelled or not defined:"), ""]
+                lines += [_red(n) for n in self.undefined]
 
         if self.has_terminal:
             lines += ["", "----- terminal output -----"]
@@ -105,3 +104,10 @@ def _indent(text: str, n: int = 4) -> str:
 def _strip_ansi(text: str) -> str:
     import re
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _red(text: str) -> str:
+    import sys
+    if not sys.stdout.isatty():
+        return text
+    return f"\x1b[31m{text}\x1b[0m"

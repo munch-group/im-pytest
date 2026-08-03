@@ -226,14 +226,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     undefined = sorted(getattr(config, "_im_undefined", ()) or [])
     if undefined:
         tr.write_line("")
-        tr.write_line("*" * 57)
-        tr.write_line("ATTENTION! These functions are not defined (yet):")
+        tr.write_line("Test script could not find the following functions,", red=True)
+        tr.write_line("which are either misspelled or not defined:", red=True)
         tr.write_line("")
         for n in undefined:
-            tr.write_line("\t" + n)
-        tr.write_line("")
-        tr.write_line("They are either misspelled or not written yet.")
-        tr.write_line("*" * 57)
+            tr.write_line(n, red=True)
 
     cache = getattr(config, "_im_student_cache", None) or {}
     not_found = [exc for exc in cache.values() if isinstance(exc, SolutionNotFoundError)]
