@@ -66,6 +66,39 @@ def test_prints_are_captured(tmp_path):
     assert "splitting" in d["stdout"] and not d["has_tb"]
 
 
+_MISMATCH_SNIPPET = (
+    "import json;from im_pytest import run;"
+    "r=run('test_tmp.py',project='tmp',failfast=False);"
+    "print(json.dumps({'ok':r.ok,'import_error':r.import_error,'traceback':r.traceback}))"
+)
+
+
+def test_mismatched_filename_reports_friendly_error(tmp_path):
+    # test_tmp.py expects a solution named tmp.py; only translationproject.py
+    # exists here — a filename mismatch, not a missing/broken solution.
+    shutil.copy(FIX / "test_translationproject.py", tmp_path / "test_tmp.py")
+    shutil.copy(FIX / "translationproject_good.py", tmp_path / "translationproject.py")
+    proc = subprocess.run([sys.executable, "-c", _MISMATCH_SNIPPET],
+                          cwd=tmp_path, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    d = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert not d["ok"]
+    assert "tmp.py" in d["import_error"]
+    assert "test_tmp.py" in d["traceback"] and "tmp.py" in d["traceback"]
+    assert "translationproject.py" in d["traceback"]   # points at the file actually present
+
+
+def test_mismatched_filename_raw_pytest_shows_banner(tmp_path):
+    shutil.copy(FIX / "test_translationproject.py", tmp_path / "test_tmp.py")
+    shutil.copy(FIX / "translationproject_good.py", tmp_path / "translationproject.py")
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "--no-header", "test_tmp.py"],
+                          cwd=tmp_path, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "COULD NOT FIND YOUR SOLUTION FILE" in proc.stdout
+    assert "test_tmp.py   +   tmp.py" in proc.stdout
+    assert "translationproject.py" in proc.stdout       # the file actually present, as a hint
+
+
 def test_cli_exit_codes(tmp_path):
     shutil.copy(FIX / "test_translationproject.py", tmp_path / "test_translationproject.py")
     shutil.copy(FIX / "translationproject_good.py", tmp_path / "translationproject.py")

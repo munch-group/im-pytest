@@ -21,7 +21,7 @@ a ~400-line per-file `unittest` harness from the old course.
 - `report.py` — `Report` / `Outcome` data model + text and HTML rendering. Every
   mode renders *this* object, so friendly output lives in one place.
 - `plugin.py` — the `pytest11` plugin (registered via entry point, so raw pytest
-  in mode 2 works with no boilerplate in the test file): the `sol` fixture
+  in mode 2 works with no boilerplate in the test file): the `module` fixture
   (imports the student's `<project>.py` **by explicit file path**, fresh each run,
   stdout suppressed), the `requires` marker + skip logic, and the terminal
   "not defined" banner. `_INJECTED` lets `%%test` supply a cell-as-module.
@@ -41,7 +41,7 @@ a ~400-line per-file `unittest` harness from the old course.
 - Import the student module **by file path** (`spec_from_file_location`), never a
   bare `import_module`, so a stale copy on `sys.path` from a previous run can't win.
 - Import the student module **once**: the mode-1 runner imports it (capturing its
-  prints) and stashes it in `plugin._INJECTED` so the `sol` fixture reuses it
+  prints) and stashes it in `plugin._INJECTED` so the `module` fixture reuses it
   rather than re-executing the file (no double prints/side effects).
 - **Assertion failures vs code errors** are separated in `_Capture`
   (`pytest_exception_interact`): an `AssertionError` about a return value is a

@@ -6,7 +6,7 @@ test_<project>.py`` (course mode 2) work with no boilerplate in the test file.
 
 It provides three things the per-project test files rely on:
 
-* a ``sol`` fixture   — the student's solution, imported fresh from the working
+* a ``module`` fixture — the student's solution, imported fresh from the working
   directory (so edits are picked up on re-run) with the student's own ``print``
   output suppressed;
 * a ``requires`` marker — ``@pytest.mark.requires("translate_codon", ...)`` skips
@@ -40,6 +40,47 @@ def student_module_name(test_module_name: str) -> str:
     """`test_translationproject` -> `translationproject`."""
     base = test_module_name.rsplit(".", 1)[-1]
     return base[5:] if base.startswith("test_") else base
+
+
+class SolutionNotFoundError(ModuleNotFoundError):
+    """No `<name>.py` exists in `cwd` (and no importable module covers it either).
+
+    Distinguished from an ordinary `ModuleNotFoundError` (a real missing
+    dependency inside the student's own code) so callers can show a targeted
+    "name your files like this" message instead of a bare Python traceback.
+    """
+
+    def __init__(self, name: str, cwd: str):
+        self.solution_name = name
+        self.cwd = cwd
+        super().__init__(f"No module named {name!r}", name=name)
+
+
+def explain_not_found(exc: SolutionNotFoundError) -> str:
+    """A friendly, actionable message for a :class:`SolutionNotFoundError`."""
+    try:
+        py_files = sorted(
+            f for f in os.listdir(exc.cwd)
+            if f.endswith(".py") and not f.startswith("test_")
+        )
+    except OSError:
+        py_files = []
+    lines = [
+        f'No file named "{exc.solution_name}.py" was found in this folder:',
+        f"    {exc.cwd}",
+    ]
+    if py_files:
+        lines += ["", "Files found here instead:"] + [f"    {f}" for f in py_files]
+    lines += [
+        "",
+        "Your test file and solution file must be in the SAME folder, and named",
+        "to match each other:",
+        "",
+        f"    test_{exc.solution_name}.py   +   {exc.solution_name}.py",
+        "",
+        'The solution file\'s name is the test file\'s name with "test_" removed.',
+    ]
+    return "\n".join(lines)
 
 
 def import_student(name: str, cwd: str | None = None) -> types.ModuleType:
@@ -78,7 +119,12 @@ def import_student(name: str, cwd: str | None = None) -> types.ModuleType:
             raise
         return module
     # Fall back to a normal import (e.g. an injected/installed module).
-    return importlib.import_module(name)
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError as exc:
+        if exc.name == name:
+            raise SolutionNotFoundError(name, cwd) from None
+        raise  # a *different* missing import, e.g. a real dependency of the module
 
 
 def _get_student(config, name):
@@ -134,10 +180,16 @@ def pytest_configure(config):
 
 
 @pytest.fixture
-def sol(request):
+def module(request):
     """The student's solution module (fresh, prints suppressed)."""
     name = student_module_name(request.module.__name__)
     obj = _get_student(request.config, name)
+    if isinstance(obj, SolutionNotFoundError):
+        pytest.fail(
+            f'Your code could not be run: no file named "{obj.solution_name}.py" '
+            "was found — see the notice at the end of this test run for how to fix it.",
+            pytrace=False,
+        )
     if isinstance(obj, Exception):
         pytest.fail(
             "Your code could not be run:\n\n" + "".join(
@@ -159,7 +211,7 @@ def pytest_collection_modifyitems(config, items):
         name = student_module_name(item.module.__name__)
         obj = _get_student(config, name)
         if isinstance(obj, Exception):
-            # the sol fixture will surface the import error; nothing to skip on
+            # the module fixture will surface the import error; nothing to skip on
             continue
         missing = [n for n in dict.fromkeys(names) if not hasattr(obj, n)]
         if missing:
@@ -170,9 +222,9 @@ def pytest_collection_modifyitems(config, items):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    tr = terminalreporter
     undefined = sorted(getattr(config, "_im_undefined", ()) or [])
     if undefined:
-        tr = terminalreporter
         tr.write_line("")
         tr.write_line("*" * 57)
         tr.write_line("ATTENTION! These functions are not defined (yet):")
@@ -181,4 +233,17 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             tr.write_line("\t" + n)
         tr.write_line("")
         tr.write_line("They are either misspelled or not written yet.")
+        tr.write_line("*" * 57)
+
+    cache = getattr(config, "_im_student_cache", None) or {}
+    not_found = [exc for exc in cache.values() if isinstance(exc, SolutionNotFoundError)]
+    if not_found:
+        tr.write_line("")
+        tr.write_line("*" * 57)
+        tr.write_line("COULD NOT FIND YOUR SOLUTION FILE")
+        tr.write_line("")
+        for exc in not_found:
+            for line in explain_not_found(exc).splitlines():
+                tr.write_line(line)
+            tr.write_line("")
         tr.write_line("*" * 57)

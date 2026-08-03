@@ -1,6 +1,20 @@
 # Sphinx inventory version 2
-# Project: im-pytest
+# Project: im_pytest
 # Version: 0.0.9999
 # The remainder of this file is compressed using zlib.
-im_pytest.modulename.functionname py:function 1 api/functionname.html#im_pytest.modulename.functionname -
-im_pytest.modulename.scriptname py:function 1 api/scriptname.html#im_pytest.modulename.scriptname -
+im_pytest.requires py:attribute 1 api/requires.html#im_pytest.requires -
+im_pytest.plugin.requires py:attribute 1 api/requires.html#im_pytest.requires im_pytest.requires
+im_pytest.Report py:class 1 api/Report.html#im_pytest.Report -
+im_pytest.report.Report py:class 1 api/Report.html#im_pytest.Report im_pytest.Report
+im_pytest.Outcome py:class 1 api/Outcome.html#im_pytest.Outcome -
+im_pytest.report.Outcome py:class 1 api/Outcome.html#im_pytest.Outcome im_pytest.Outcome
+im_pytest.run py:function 1 api/run.html#im_pytest.run -
+im_pytest.runner.run py:function 1 api/run.html#im_pytest.run im_pytest.run
+im_pytest.run_injected py:function 1 api/run_injected.html#im_pytest.run_injected -
+im_pytest.runner.run_injected py:function 1 api/run_injected.html#im_pytest.run_injected im_pytest.run_injected
+im_pytest.check py:function 1 api/check.html#im_pytest.check -
+im_pytest.widget.check py:function 1 api/check.html#im_pytest.check im_pytest.check
+im_pytest.register_test_magic py:function 1 api/register_test_magic.html#im_pytest.register_test_magic -
+im_pytest.widget.register_test_magic py:function 1 api/register_test_magic.html#im_pytest.register_test_magic im_pytest.register_test_magic
+im_pytest.TestResultWidget py:class 1 api/TestResultWidget.html#im_pytest.TestResultWidget -
+im_pytest.widget.TestResultWidget py:class 1 api/TestResultWidget.html#im_pytest.TestResultWidget im_pytest.TestResultWidget

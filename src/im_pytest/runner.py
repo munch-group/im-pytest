@@ -166,6 +166,13 @@ def run(test_path: str, *, project: str = "", failfast: bool = True) -> Report:
     try:
         with redirect_stdout(pre), redirect_stderr(pre):
             module = _plugin.import_student(project)
+    except _plugin.SolutionNotFoundError as exc:
+        return Report(
+            project=project,
+            import_error=f'No file named "{exc.solution_name}.py" was found',
+            traceback=_plugin.explain_not_found(exc),
+            stdout=pre.getvalue().rstrip("\n"),
+        )
     except Exception as exc:  # noqa: BLE001
         student_file = os.path.join(os.getcwd(), project + ".py")
         return Report(
