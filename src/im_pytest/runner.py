@@ -136,7 +136,7 @@ class _Capture:
 
 def _run_pytest(test_path, student_file, failfast) -> _Capture:
     cap = _Capture(student_file=student_file)
-    args = [str(test_path), "-p", "no:cacheprovider", "-q", "--no-header"]
+    args = [str(test_path), "-c", os.devnull, "-p", "no:cacheprovider", "-q", "--no-header"]
     if failfast:
         args.append("-x")
     sink = io.StringIO()

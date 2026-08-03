@@ -39,14 +39,18 @@ suppressed) and mark each test with `requires` so an unwritten function is
 reported as "not defined" instead of crashing:
 
 ```python
-import pytest
+from im_pytest import requires
 
-@pytest.mark.requires("translate_codon")
+@requires.translate_codon
 def test_translate_codon(sol):
     assert sol.translate_codon("ATG") == "M"
     assert sol.translate_codon("NNN") == "?"     # invalid codon
     assert sol.translate_codon("atg") == "M"     # lowercase
 ```
+
+`@requires.translate_codon` is sugar for `@pytest.mark.requires("translate_codon")`
+(and stacks equivalently if two are put on the same test); for several names at
+once use the call form, `@requires("translate_codon", "split_codons")`.
 
 `sol` resolves to `<project>.py` in the working folder (the module name is the
 test file name minus its `test_` prefix). Project test files and their data live

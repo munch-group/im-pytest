@@ -1,0 +1,6 @@
+# Outcome { #im_pytest.Outcome }
+
+```python
+im_pytest.Outcome(name, status, message='')
+```
+

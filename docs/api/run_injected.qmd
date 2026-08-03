@@ -1,0 +1,14 @@
+# run_injected { #im_pytest.run_injected }
+
+```python
+im_pytest.run_injected(
+    project,
+    module,
+    test_path,
+    *,
+    pre_stdout='',
+    failfast=True,
+)
+```
+
+Run against an in-notebook module built by the ``%%test`` cell magic.

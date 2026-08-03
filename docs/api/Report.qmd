@@ -1,0 +1,13 @@
+# Report { #im_pytest.Report }
+
+```python
+im_pytest.Report(
+    project='',
+    outcomes=list(),
+    undefined=list(),
+    stdout='',
+    traceback='',
+    import_error=None,
+)
+```
+

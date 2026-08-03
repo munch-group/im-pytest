@@ -1,0 +1,7 @@
+# register_test_magic { #im_pytest.register_test_magic }
+
+```python
+im_pytest.register_test_magic(ipython=None)
+```
+
+Register the ``%%test <project>`` cell magic (idempotent).

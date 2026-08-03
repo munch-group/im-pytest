@@ -76,7 +76,7 @@ format:
       theme: neutral 
 
 quartodoc:
-  package: im-pytest
+  package: im_pytest
   style: pkgdown
   dir: api
   render_interlinks: true

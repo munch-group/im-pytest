@@ -1,0 +1,7 @@
+# run { #im_pytest.run }
+
+```python
+im_pytest.run(test_path, *, project='', failfast=True)
+```
+
+Run ``test_path`` against the student's ``<project>.py`` in the cwd.

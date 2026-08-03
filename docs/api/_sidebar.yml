@@ -3,10 +3,14 @@ website:
   - contents:
     - api/index.qmd
     - contents:
-      - api/functionname.qmd
-      section: Some section
-    - contents:
-      - api/scriptname.qmd
-      section: Some other section
+      - api/requires.qmd
+      - api/Report.qmd
+      - api/Outcome.qmd
+      - api/run.qmd
+      - api/run_injected.qmd
+      - api/check.qmd
+      - api/register_test_magic.qmd
+      - api/TestResultWidget.qmd
+      section: im_pytest
     id: api
   - id: dummy-sidebar

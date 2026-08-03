@@ -1,11 +1,24 @@
 # Function reference {.doc .doc-index}
 
-## Some section
+## im_pytest
 
-Some description...
+im-pytest — run the course's project tests three ways.
 
-<!-- 
+* ``check("translationproject")`` or ``%%test translationproject`` — friendly,
+  hidden test runner for the early weeks (mode 1).
+* ``pytest test_translationproject.py`` — the raw pytest CLI, once students learn
+  to read its output (mode 2).
+* students write their own ``assert`` tests to validate AI-produced code (mode 3).
+
+Importing the package registers the ``%%test`` cell magic when run in IPython.
+
 | | |
 | --- | --- |
-| [functionname](functionname.qmd#im_pytest.functionname) | blah blah. |
- -->
+| [requires](requires.qmd#im_pytest.requires) |  |
+| [Report](Report.qmd#im_pytest.Report) |  |
+| [Outcome](Outcome.qmd#im_pytest.Outcome) |  |
+| [run](run.qmd#im_pytest.run) | Run ``test_path`` against the student's ``<project>.py`` in the cwd. |
+| [run_injected](run_injected.qmd#im_pytest.run_injected) | Run against an in-notebook module built by the ``%%test`` cell magic. |
+| [check](check.qmd#im_pytest.check) | Test the student's ``<project>.py`` in the working folder. |
+| [register_test_magic](register_test_magic.qmd#im_pytest.register_test_magic) | Register the ``%%test <project>`` cell magic (idempotent). |
+| [TestResultWidget](TestResultWidget.qmd#im_pytest.TestResultWidget) |  |

@@ -1,0 +1,9 @@
+# check { #im_pytest.check }
+
+```python
+im_pytest.check(project, *, tests=None, failfast=True)
+```
+
+Test the student's ``<project>.py`` in the working folder.
+
+>>> check("translationproject")

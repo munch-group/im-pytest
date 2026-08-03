@@ -12,6 +12,9 @@ It provides three things the per-project test files rely on:
 * a ``requires`` marker — ``@pytest.mark.requires("translate_codon", ...)`` skips
   a test when the student has not defined (or has misspelled) a needed name, and
   collects the missing names;
+* the ``requires`` decorator sugar (``im_pytest.requires``) — ``@requires.translate_codon``
+  for the common single-name case, ``@requires("a", "b")`` for several; both are
+  shorthand for the marker above;
 * a "functions not defined" summary at the end of a raw pytest run.
 """
 from __future__ import annotations
@@ -92,6 +95,32 @@ def _get_student(config, name):
 
 
 # --------------------------------------------------------------------------- #
+# requires decorator sugar
+# --------------------------------------------------------------------------- #
+
+class _Requires:
+    """``@requires.name`` / ``@requires("a", "b")`` — sugar for the ``requires`` marker.
+
+    The attribute form is both shorter and safer than ``@pytest.mark.requires(...)``:
+    the required name is baked into the attribute access itself, so — unlike the raw
+    marker — there's no way to write it and forget the name (forgetting the call
+    parens on ``@pytest.mark.requires`` silently applies an empty, always-passing
+    requirement instead of raising an error).
+    """
+
+    def __call__(self, *names):
+        return pytest.mark.requires(*names)
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return pytest.mark.requires(name)
+
+
+requires = _Requires()
+
+
+# --------------------------------------------------------------------------- #
 # pytest hooks
 # --------------------------------------------------------------------------- #
 
@@ -121,15 +150,18 @@ def sol(request):
 
 def pytest_collection_modifyitems(config, items):
     for item in items:
-        marker = item.get_closest_marker("requires")
-        if marker is None:
+        # iter_markers (not get_closest_marker) so stacked marks — e.g. two
+        # separate @requires.name decorators on one test — all count, instead
+        # of only the closest one silently shadowing the rest.
+        names = [n for marker in item.iter_markers("requires") for n in marker.args]
+        if not names:
             continue
         name = student_module_name(item.module.__name__)
         obj = _get_student(config, name)
         if isinstance(obj, Exception):
             # the sol fixture will surface the import error; nothing to skip on
             continue
-        missing = [n for n in marker.args if not hasattr(obj, n)]
+        missing = [n for n in dict.fromkeys(names) if not hasattr(obj, n)]
         if missing:
             config._im_undefined.update(missing)
             item.add_marker(

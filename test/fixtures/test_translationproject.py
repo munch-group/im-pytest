@@ -1,9 +1,9 @@
 """Tests for the translation project (ported to pytest).
 
-Every test receives ``sol`` — your solution module — and uses the ``requires``
-marker so an unwritten function is reported as "not defined" instead of crashing.
+Every test receives ``sol`` — your solution module — and uses ``requires`` so an
+unwritten function is reported as "not defined" instead of crashing.
 """
-import pytest
+from im_pytest import requires
 
 CODON_MAP = {
     'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L', 'TCT': 'S', 'TCC': 'S',
@@ -20,12 +20,12 @@ CODON_MAP = {
 }
 
 
-@pytest.mark.requires("codon_map")
+@requires.codon_map
 def test_codon_map(sol):
     assert sol.codon_map == CODON_MAP
 
 
-@pytest.mark.requires("translate_codon")
+@requires.translate_codon
 def test_translate_codon(sol):
     assert sol.translate_codon("ATG") == "M"
     assert sol.translate_codon("TAA") == "*"
@@ -34,14 +34,14 @@ def test_translate_codon(sol):
     assert sol.translate_codon("atg") == "M"      # lowercase (added by audit)
 
 
-@pytest.mark.requires("split_codons")
+@requires.split_codons
 def test_split_codons(sol):
     assert sol.split_codons("AAATTTCCCGGG") == ["AAA", "TTT", "CCC", "GGG"]
     assert sol.split_codons("ATG") == ["ATG"]
     assert sol.split_codons("") == []             # empty (added by audit)
 
 
-@pytest.mark.requires("translate_orf")
+@requires.translate_orf
 def test_translate_orf(sol):
     assert sol.translate_orf("ATGCCCATGTGA") == "MPM*"
     assert sol.translate_orf("ATGATNATGTGA") == "M?M*"

@@ -1,0 +1,6 @@
+# TestResultWidget { #im_pytest.TestResultWidget }
+
+```python
+im_pytest.TestResultWidget(report)
+```
+

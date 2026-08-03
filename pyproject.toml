@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "pytest>=7",
+    "setuptools>=61.0",
     "ipython",
     "anywidget>=0.11,<0.12",
     "traitlets>=5.0",
