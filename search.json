@@ -33,21 +33,109 @@
     ]
   },
   {
+    "objectID": "api/run.html",
+    "href": "api/run.html",
+    "title": "run",
+    "section": "",
+    "text": "run\nim_pytest.run(test_path, *, project='', failfast=True)\nRun test_path against the student’s &lt;project&gt;.py in the cwd.",
+    "crumbs": [
+      "im_pytest",
+      "run"
+    ]
+  },
+  {
+    "objectID": "api/run_injected.html",
+    "href": "api/run_injected.html",
+    "title": "run_injected",
+    "section": "",
+    "text": "run_injected\nim_pytest.run_injected(\n    project,\n    module,\n    test_path,\n    *,\n    pre_stdout='',\n    failfast=True,\n)\nRun against an in-notebook module built by the %%test cell magic.",
+    "crumbs": [
+      "im_pytest",
+      "run_injected"
+    ]
+  },
+  {
+    "objectID": "api/requires.html",
+    "href": "api/requires.html",
+    "title": "requires",
+    "section": "",
+    "text": "requires\nim_pytest.requires",
+    "crumbs": [
+      "im_pytest",
+      "requires"
+    ]
+  },
+  {
+    "objectID": "api/Outcome.html",
+    "href": "api/Outcome.html",
+    "title": "Outcome",
+    "section": "",
+    "text": "Outcome\nim_pytest.Outcome(name, status, message='')",
+    "crumbs": [
+      "im_pytest",
+      "Outcome"
+    ]
+  },
+  {
+    "objectID": "api/register_test_magic.html",
+    "href": "api/register_test_magic.html",
+    "title": "register_test_magic",
+    "section": "",
+    "text": "register_test_magic\nim_pytest.register_test_magic(ipython=None)\nRegister the %%test &lt;project&gt; cell magic (idempotent).",
+    "crumbs": [
+      "im_pytest",
+      "register_test_magic"
+    ]
+  },
+  {
+    "objectID": "api/check.html",
+    "href": "api/check.html",
+    "title": "check",
+    "section": "",
+    "text": "check\nim_pytest.check(project, *, tests=None, failfast=True)\nTest the student’s &lt;project&gt;.py in the working folder.\n\n\n\ncheck(“translationproject”)",
+    "crumbs": [
+      "im_pytest",
+      "check"
+    ]
+  },
+  {
+    "objectID": "api/Report.html",
+    "href": "api/Report.html",
+    "title": "Report",
+    "section": "",
+    "text": "Report\nim_pytest.Report(\n    project='',\n    outcomes=list(),\n    undefined=list(),\n    stdout='',\n    traceback='',\n    import_error=None,\n)",
+    "crumbs": [
+      "im_pytest",
+      "Report"
+    ]
+  },
+  {
+    "objectID": "api/TestResultWidget.html",
+    "href": "api/TestResultWidget.html",
+    "title": "TestResultWidget",
+    "section": "",
+    "text": "TestResultWidget\nim_pytest.TestResultWidget(report)",
+    "crumbs": [
+      "im_pytest",
+      "TestResultWidget"
+    ]
+  },
+  {
     "objectID": "api/index.html",
     "href": "api/index.html",
     "title": "Function reference",
     "section": "",
-    "text": "Some description…",
+    "text": "im-pytest — run the course’s project tests three ways.\n\ncheck(\"translationproject\") or %%test translationproject — friendly, hidden test runner for the early weeks (mode 1).\npytest test_translationproject.py — the raw pytest CLI, once students learn to read its output (mode 2).\nstudents write their own assert tests to validate AI-produced code (mode 3).\n\nImporting the package registers the %%test cell magic when run in IPython.\n\n\n\nrequires\n\n\n\nReport\n\n\n\nOutcome\n\n\n\nrun\nRun test_path against the student’s &lt;project&gt;.py in the cwd.\n\n\nrun_injected\nRun against an in-notebook module built by the %%test cell magic.\n\n\ncheck\nTest the student’s &lt;project&gt;.py in the working folder.\n\n\nregister_test_magic\nRegister the %%test &lt;project&gt; cell magic (idempotent).\n\n\nTestResultWidget",
     "crumbs": [
       "Function reference"
     ]
   },
   {
-    "objectID": "api/index.html#some-section",
-    "href": "api/index.html#some-section",
+    "objectID": "api/index.html#im_pytest",
+    "href": "api/index.html#im_pytest",
     "title": "Function reference",
     "section": "",
-    "text": "Some description…",
+    "text": "im-pytest — run the course’s project tests three ways.\n\ncheck(\"translationproject\") or %%test translationproject — friendly, hidden test runner for the early weeks (mode 1).\npytest test_translationproject.py — the raw pytest CLI, once students learn to read its output (mode 2).\nstudents write their own assert tests to validate AI-produced code (mode 3).\n\nImporting the package registers the %%test cell magic when run in IPython.\n\n\n\nrequires\n\n\n\nReport\n\n\n\nOutcome\n\n\n\nrun\nRun test_path against the student’s &lt;project&gt;.py in the cwd.\n\n\nrun_injected\nRun against an in-notebook module built by the %%test cell magic.\n\n\ncheck\nTest the student’s &lt;project&gt;.py in the working folder.\n\n\nregister_test_magic\nRegister the %%test &lt;project&gt; cell magic (idempotent).\n\n\nTestResultWidget",
     "crumbs": [
       "Function reference"
     ]

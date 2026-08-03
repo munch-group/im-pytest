@@ -2,14 +2,46 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://munch-group.github.io/im-pytest/pages/example.html</loc>
-    <lastmod>2026-08-03T07:14:09.141Z</lastmod>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/run.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/run_injected.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/requires.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/Outcome.html</loc>
+    <lastmod>2026-08-03T09:20:50.938Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/register_test_magic.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/check.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/Report.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
+  </url>
+  <url>
+    <loc>https://munch-group.github.io/im-pytest/api/TestResultWidget.html</loc>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
   </url>
   <url>
     <loc>https://munch-group.github.io/im-pytest/api/index.html</loc>
-    <lastmod>2026-08-03T07:14:09.141Z</lastmod>
+    <lastmod>2026-08-03T09:20:50.939Z</lastmod>
   </url>
   <url>
     <loc>https://munch-group.github.io/im-pytest/pages/overview.html</loc>
-    <lastmod>2026-08-03T07:14:09.141Z</lastmod>
+    <lastmod>2026-08-03T09:20:50.940Z</lastmod>
   </url>
 </urlset>
