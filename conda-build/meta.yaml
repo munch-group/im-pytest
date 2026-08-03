@@ -1,4 +1,5 @@
 {% set pyproject = load_file_data("../pyproject.toml", from_recipe_dir=True) %}
+{% set python_spec = "python " ~ pyproject.get("project").get("requires-python") %}
 
 package:
   name: im-pytest
@@ -16,13 +17,14 @@ build:
 
 requirements:
   host:
-    - python
+    - {{ python_spec }}
     - pip
-    - setuptools>=65.0    
+    - setuptools>=65.0
   run:  # your library dependencies
+    - {{ python_spec }}
     {% for dep in pyproject.get("project").get("dependencies") %}
     - {{ dep.lower() }}
-    {% endfor %}  
+    {% endfor %}
 
 channels:  # channels for your library dependencies
   - conda-forge
