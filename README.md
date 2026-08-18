@@ -31,6 +31,36 @@ There is also a terminal entry point:
 pytest-check translationproject.py      # or: pytest-check translationproject
 ```
 
+## Checking the reference solutions (teacher side)
+
+A test file that is wrong is invisible while the stub is empty: every check for
+a function the student has not written yet is skipped, and a run of nothing but
+skips looks green. The tests are only really exercised once something implements
+them — which, before term, means the reference solution.
+
+```bash
+pytest test_translationproject.py --solution   # runs translationproject_solution.py
+pytest-check --solution translationproject     # the same, friendly output
+pytest-check --sweep project-files/            # every project, one line each
+```
+
+`--solution` imports `<project>_solution.py` in place of `<project>.py`, bound to
+the same module name, so the test file cannot tell the difference. Nothing is
+copied, renamed or written: the `<project>.py` that ships to students is not even
+read. `IM_SOLUTION_SUFFIX=_solution` is the same switch for a notebook or a CI
+job that does not own pytest's argv, and `check("translationproject",
+solution=True)` is the notebook form.
+
+One rule differs from student mode. A student is allowed not to have written a
+function yet, so their tests skip; a reference solution is not, so in solution
+mode a required name that the solution does not define fails instead of skipping.
+Otherwise a name misspelled on either side would report as green — the exact
+thing this mode exists to catch.
+
+`--sweep` runs each project in a subprocess with its working directory set to
+that project's own folder, which is what a test file that opens a data file by a
+plain relative name needs, and exits non-zero if any solution fails.
+
 ## Writing a project test file
 
 Per-project test files are plain, idiomatic pytest. They receive `module` (the

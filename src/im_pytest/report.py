@@ -37,6 +37,7 @@ class Report:
     stdout: str = ""                                     # captured student prints
     traceback: str = ""                                  # colored traceback of a code error
     import_error: Optional[str] = None                   # short "cannot run" summary
+    collect_error: Optional[str] = None                  # pytest could not load the test file
 
     @property
     def passed(self) -> int:
@@ -56,13 +57,21 @@ class Report:
 
     @property
     def ok(self) -> bool:
-        return self.import_error is None and self.failed == 0 and not self.undefined
+        return (self.import_error is None and self.collect_error is None
+                and self.failed == 0 and not self.undefined)
 
     # ---- plain-text rendering (CLI) -------------------------------------- #
 
     def to_text(self) -> str:
         lines = []
-        if self.import_error is not None:
+        if self.collect_error is not None:
+            lines.append("THE TESTS COULD NOT BE STARTED")
+            lines.append("")
+            lines.append("This is a problem with the test file or the folder it is in,")
+            lines.append("not with your code:")
+            lines.append("")
+            lines.append(_indent(self.collect_error))
+        elif self.import_error is not None:
             lines.append("YOUR CODE CANNOT BE RUN")
             lines.append("")
             lines.append(self.import_error)
@@ -84,7 +93,9 @@ class Report:
                 lines.append(_strip_ansi(self.traceback).rstrip("\n"))
 
         lines.append("")
-        if self.import_error is not None:
+        if self.collect_error is not None:
+            lines.append("Ask for help with this one — it is not something your code did.")
+        elif self.import_error is not None:
             lines.append("Fix the error above, then run the tests again.")
         elif self.ok:
             lines.append(f"All {self.passed} checks passed. Nice work!")

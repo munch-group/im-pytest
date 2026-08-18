@@ -101,6 +101,9 @@ class _Capture:
         self.student_file = student_file
         self.stdout_parts: list[str] = []
         self.traceback = ""
+        self.collect_error = ""
+        self.exit_code = 0
+        self.pytest_output = ""
         self._done: set[str] = set()
 
     def pytest_configure(self, config):
@@ -116,6 +119,17 @@ class _Capture:
         exc = getattr(call, "excinfo", None)
         if exc is None:
             return
+        if not isinstance(node, pytest.Item):
+            # Collection failed: pytest could not even load the test file (or a
+            # folder on the way to it). That is not a check on any function of
+            # the student's, and recording it as one names the check after a
+            # path component — a run that dies collecting /Users/kmt reports a
+            # failed check called "kmt". Keep it separate and say what it is.
+            if not self.collect_error:
+                self.collect_error = f"{exc.type.__name__}: {exc.value}"
+                self.traceback = self.traceback or format_traceback(
+                    exc.type, exc.value, exc.tb)
+            return
         name = _clean_name(report.nodeid)
         if issubclass(exc.type, AssertionError):
             self._record(name, FAIL, _assert_message(report))
@@ -124,6 +138,11 @@ class _Capture:
             self._record(name, ERROR, f"raised {exc.type.__name__}: {exc.value}")
             if not self.traceback:
                 self.traceback = format_traceback(exc.type, exc.value, exc.tb, self.student_file)
+
+    def pytest_collectreport(self, report):
+        if report.failed and not self.collect_error:
+            self.collect_error = str(getattr(report, "longrepr", "") or
+                                     "the test file could not be collected")
 
     def pytest_runtest_logreport(self, report):
         if report.when == "call":
@@ -134,19 +153,44 @@ class _Capture:
                 self._record(_clean_name(report.nodeid), PASS)
 
 
-def _run_pytest(test_path, student_file, failfast) -> _Capture:
+def _run_pytest(test_path, student_file, failfast, suffix="") -> _Capture:
     cap = _Capture(student_file=student_file)
-    args = [str(test_path), "-c", os.devnull, "-p", "no:cacheprovider", "-q", "--no-header"]
+    # rootdir and confcutdir are pinned to the folder holding the test file.
+    # Left to itself pytest walks *up* from the test file, building a collector
+    # for every parent inside confcutdir and listing each one; `-c os.devnull`
+    # puts the rootdir at /dev, which is above nothing, so the walk runs to "/"
+    # and the listing takes in the whole home directory on the way. Pinned, a
+    # run of one project's tests looks at exactly one folder: the project's own.
+    here = os.path.dirname(os.path.abspath(str(test_path))) or os.getcwd()
+    args = [str(test_path), "-c", os.devnull, "--rootdir", here, "--confcutdir", here,
+            "-p", "no:cacheprovider", "-q", "--no-header"]
     if failfast:
         args.append("-x")
+    if suffix:
+        args += ["--solution", "--solution-suffix", suffix]
     sink = io.StringIO()
     with redirect_stdout(sink), redirect_stderr(sink):
-        pytest.main(args, plugins=[cap])
+        cap.exit_code = pytest.main(args, plugins=[cap])
+    cap.pytest_output = sink.getvalue()
     return cap
+
+
+def _first_lines(text, n=12) -> str:
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    return "\n".join(lines[:n])
 
 
 def _build_report(project, cap, pre_stdout="") -> Report:
     rep = Report(project=project, outcomes=cap.outcomes)
+    rep.collect_error = cap.collect_error or None
+    if rep.collect_error is None and not cap.outcomes and cap.exit_code != 0:
+        # Nothing ran, and pytest is unhappy — a conftest that raises, a test
+        # file with no tests, a usage error. None of those hooks fire through
+        # the plugin, so without this the report is empty *and* content: no
+        # failures, no undefined names, therefore "all checks passed".
+        rep.collect_error = (_first_lines(cap.pytest_output)
+                             or f"pytest stopped with exit code {int(cap.exit_code)} "
+                                "before running any checks")
     if cap.config is not None:
         rep.undefined = sorted(getattr(cap.config, "_im_undefined", set()) or [])
     stdout = (pre_stdout or "") + "".join(cap.stdout_parts)
@@ -155,9 +199,16 @@ def _build_report(project, cap, pre_stdout="") -> Report:
     return rep
 
 
-def run(test_path: str, *, project: str = "", failfast: bool = True) -> Report:
-    """Run ``test_path`` against the student's ``<project>.py`` in the cwd."""
+def run(test_path: str, *, project: str = "", failfast: bool = True,
+        solution: bool | str = False) -> Report:
+    """Run ``test_path`` against the student's ``<project>.py`` in the cwd.
+
+    With ``solution=True`` the reference ``<project>_solution.py`` is run
+    instead (or ``solution="<suffix>"`` for another suffix). The student's
+    ``<project>.py`` is not read and not written.
+    """
     project = project or _plugin.student_module_name(os.path.basename(test_path).rsplit(".", 1)[0])
+    suffix = _plugin.SOLUTION_SUFFIX if solution is True else (solution or "")
 
     # Import the student's file *once*, capturing its own prints; a failure here
     # (syntax error, exception at import time) becomes a friendly "cannot run".
@@ -165,16 +216,16 @@ def run(test_path: str, *, project: str = "", failfast: bool = True) -> Report:
     already_injected = project in _plugin._INJECTED
     try:
         with redirect_stdout(pre), redirect_stderr(pre):
-            module = _plugin.import_student(project)
+            module = _plugin.import_student(project, suffix=suffix)
     except _plugin.SolutionNotFoundError as exc:
         return Report(
             project=project,
-            import_error=f'No file named "{exc.solution_name}.py" was found',
+            import_error=f'No file named "{exc.filename}" was found',
             traceback=_plugin.explain_not_found(exc),
             stdout=pre.getvalue().rstrip("\n"),
         )
     except Exception as exc:  # noqa: BLE001
-        student_file = os.path.join(os.getcwd(), project + ".py")
+        student_file = os.path.join(os.getcwd(), project + suffix + ".py")
         return Report(
             project=project,
             import_error=f"{type(exc).__name__}: {exc}",
@@ -186,7 +237,7 @@ def run(test_path: str, *, project: str = "", failfast: bool = True) -> Report:
     if not already_injected:
         _plugin._INJECTED[project] = module
     try:
-        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast)
+        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, suffix)
     finally:
         if not already_injected:
             _plugin._INJECTED.pop(project, None)

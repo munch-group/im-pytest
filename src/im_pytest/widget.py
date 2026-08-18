@@ -168,7 +168,12 @@ class TestResultWidget(anywidget.AnyWidget):
         super().__init__()
         self.layout.width = "100%"
         self.project = report.project
-        if report.import_error is not None:
+        if report.collect_error is not None:
+            self.results = [{"name": "the tests could not be started", "status": ERROR,
+                             "message": report.collect_error}]
+            self.summary = "Something stopped pytest before it reached your code."
+            self.ok = False
+        elif report.import_error is not None:
             self.results = [{"name": report.import_error, "status": ERROR,
                              "message": "Your code could not be run — see the terminal output below."}]
             self.summary = "Fix the error below, then run the checks again."
@@ -189,25 +194,35 @@ class TestResultWidget(anywidget.AnyWidget):
         self.traceback = report.traceback
 
 
-def _show(report: Report):
+def _show(report: Report) -> None:
+    """Render a report, and return nothing.
+
+    Returning the report would make Jupyter echo its ``repr`` under the widget —
+    a screenful of dataclass fields and escaped ANSI codes below the friendly
+    output the widget just drew. Anyone who wants the object calls ``run()``.
+    """
     ip = get_ipython()
     if ip is not None:
         try:
             _ipy_display(TestResultWidget(report))
-            return report
+            return
         except Exception:  # pragma: no cover
             pass
     print(report.to_text())
-    return report
 
 
-def check(project: str, *, tests: str | None = None, failfast: bool = True):
+def check(project: str, *, tests: str | None = None, failfast: bool = True,
+          solution: bool | str = False) -> None:
     """Test the student's ``<project>.py`` in the working folder.
 
     >>> check("translationproject")
+
+    ``solution=True`` runs the reference ``<project>_solution.py`` instead — a
+    teacher-side check, and the way a ``solution_walkthrough.ipynb`` can prove
+    itself against the tests it is a walkthrough of.
     """
     test_path = tests or resolve_test(project)
-    return _show(run(test_path, project=project, failfast=failfast))
+    _show(run(test_path, project=project, failfast=failfast, solution=solution))
 
 
 def register_test_magic(ipython=None):
@@ -241,9 +256,10 @@ def register_test_magic(ipython=None):
                          import_error=f"{type(exc).__name__}: {exc}",
                          traceback=format_traceback(type(exc), exc, exc.__traceback__, filename),
                          stdout=buf.getvalue().rstrip("\n"))
-            return _show(rep)
+            _show(rep)
+            return
         rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue())
         ip.user_ns.update({k: v for k, v in module.__dict__.items() if not k.startswith("__")})
-        return _show(rep)
+        _show(rep)
 
     ip.register_magic_function(test, magic_kind="cell", magic_name="test")

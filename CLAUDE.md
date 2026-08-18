@@ -33,7 +33,8 @@ a ~400-line per-file `unittest` harness from the old course.
   only when the student's code printed or raised a non-assertion error, a separate
   **Terminal output** card with their prints and a colored, student-focused
   traceback — mirroring the `%%exercise` widget.
-- `cli.py` — the `pytest-check` console entry point.
+- `cli.py` — the `pytest-check` console entry point, including `--solution` and
+  the `--sweep <dir>` pre-term check over every project.
 - `resources.py` — locate `test_<project>.py` (working folder or `IM_PROJECT_TESTS`).
 
 ## Conventions & gotchas
@@ -53,6 +54,23 @@ a ~400-line per-file `unittest` harness from the old course.
   is safe to have globally installed.
 - Test the runner in a **fresh subprocess** (see `test/test_runner.py`), never by
   nesting `pytest.main` inside an outer pytest run.
+- **Solution mode** (`--solution`, `IM_SOLUTION_SUFFIX`, `run(solution=True)`) is
+  one suffix on the filename `plugin.import_student` opens: `<project>_solution.py`
+  instead of `<project>.py`, under the same module name. It must never fall back
+  to `<project>.py` when the solution is missing — testing the stub by accident
+  reports skips, and a run of skips reads as green. In solution mode a missing
+  `requires` name fails rather than skips, for the same reason.
+- **Never let pytest collect above the project folder.** `runner._run_pytest`
+  pins `--rootdir`/`--confcutdir` to the test file's own directory, and the plugin's
+  `pytest_ignore_collect` skips directories that hold neither the working folder
+  nor anything asked for. Left alone, pytest builds a collector for every parent
+  up to the rootdir and lists each one, so a stray `pyproject.toml` in a home
+  directory (or `-c os.devnull`, which puts the rootdir at `/dev`) makes one
+  project's tests read the whole home directory — and hang on the first
+  cloud-synced placeholder folder they stat.
+- A run in which *nothing* ran is not a pass. `_build_report` turns a non-zero
+  pytest exit code with no outcomes into a `collect_error`; without it an empty
+  report satisfies "no failures, no undefined names" and renders as all-clear.
 - Grade/auto-marking mode is deferred.
 
 ## Course integration status

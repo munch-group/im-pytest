@@ -16,6 +16,12 @@ It provides three things the per-project test files rely on:
   for the common single-name case, ``@requires("a", "b")`` for several; both are
   shorthand for the marker above;
 * a "functions not defined" summary at the end of a raw pytest run.
+
+It also provides *solution mode* (``pytest --solution``), which runs the very
+same test file against ``<project>_solution.py`` instead of ``<project>.py``.
+That is a teacher-side check — "do the tests I hand out actually pass against
+the reference solution?" — and it never touches the ``<project>.py`` stub that
+ships to students.
 """
 from __future__ import annotations
 
@@ -30,6 +36,31 @@ import pytest
 # %%test injects a module here so the fixture can return an in-notebook cell
 # instead of a file on disk. Keyed by module name.
 _INJECTED: dict[str, types.ModuleType] = {}
+
+
+# --------------------------------------------------------------------------- #
+# solution mode
+# --------------------------------------------------------------------------- #
+# With solution mode on, `<name>_solution.py` is imported *in place of*
+# `<name>.py`, under the module name `<name>` — so the test file, the `module`
+# fixture and every `@requires(...)` are untouched, and so is the `<name>.py`
+# stub that students receive: nothing is copied, renamed or written anywhere.
+#
+# Switched on for one run with `pytest --solution`, and for a whole process with
+# the IM_SOLUTION_SUFFIX environment variable (which is how a notebook or a CI
+# job turns it on without owning pytest's argv).
+
+SOLUTION_SUFFIX = "_solution"
+SUFFIX_ENV = "IM_SOLUTION_SUFFIX"
+
+
+def solution_suffix(config=None) -> str:
+    """The filename suffix to import instead of `<name>.py`; "" for students."""
+    if config is not None:
+        suffix = getattr(config, "_im_solution_suffix", None)
+        if suffix is not None:
+            return suffix
+    return os.environ.get(SUFFIX_ENV, "")
 
 
 # --------------------------------------------------------------------------- #
@@ -50,14 +81,21 @@ class SolutionNotFoundError(ModuleNotFoundError):
     "name your files like this" message instead of a bare Python traceback.
     """
 
-    def __init__(self, name: str, cwd: str):
+    def __init__(self, name: str, cwd: str, filename: str | None = None):
         self.solution_name = name
         self.cwd = cwd
+        self.filename = filename or name + ".py"
         super().__init__(f"No module named {name!r}", name=name)
 
 
 def explain_not_found(exc: SolutionNotFoundError) -> str:
     """A friendly, actionable message for a :class:`SolutionNotFoundError`."""
+    if exc.filename != exc.solution_name + ".py":
+        # Solution mode: whoever is reading this is checking a reference
+        # solution, not a student who has misnamed a file, so say plainly what
+        # was looked for and stop. Nothing here is advice about naming.
+        return (f'No reference solution "{exc.filename}" was found in this folder:\n'
+                f"    {exc.cwd}")
     try:
         py_files = sorted(
             f for f in os.listdir(exc.cwd)
@@ -83,8 +121,12 @@ def explain_not_found(exc: SolutionNotFoundError) -> str:
     return "\n".join(lines)
 
 
-def import_student(name: str, cwd: str | None = None) -> types.ModuleType:
+def import_student(name: str, cwd: str | None = None, *, suffix: str = "") -> types.ModuleType:
     """Import (or re-import) the student's `<name>.py` from `cwd`.
+
+    With `suffix` (solution mode) the file read is `<name><suffix>.py` instead,
+    still bound to the module name `<name>` so the test file cannot tell the
+    difference. The `<name>.py` next to it is left alone.
 
     Loaded by explicit file path (so it can't accidentally resolve to a stale
     copy left on ``sys.path`` by a previous run), with ``cwd`` also put at the
@@ -107,7 +149,8 @@ def import_student(name: str, cwd: str | None = None) -> types.ModuleType:
     sys.modules.pop(name, None)           # drop any cached copy so edits are seen
     importlib.invalidate_caches()
 
-    path = os.path.join(cwd, name + ".py")
+    filename = name + suffix + ".py"
+    path = os.path.join(cwd, filename)
     if os.path.exists(path):
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
@@ -118,6 +161,12 @@ def import_student(name: str, cwd: str | None = None) -> types.ModuleType:
             sys.modules.pop(name, None)
             raise
         return module
+    if suffix:
+        # Solution mode, and the reference solution is not here. Do *not* fall
+        # back to `<name>.py`: that would quietly run the tests against the
+        # student stub, skip every check for a function the stub does not
+        # define, and report the run as green.
+        raise SolutionNotFoundError(name, cwd, filename)
     # Fall back to a normal import (e.g. an injected/installed module).
     try:
         return importlib.import_module(name)
@@ -132,12 +181,13 @@ def _get_student(config, name):
     cache = getattr(config, "_im_student_cache", None)
     if cache is None:
         cache = config._im_student_cache = {}
-    if name not in cache:
+    key = (name, solution_suffix(config))
+    if key not in cache:
         try:
-            cache[name] = import_student(name)
+            cache[key] = import_student(name, suffix=key[1])
         except Exception as exc:                       # noqa: BLE001
-            cache[name] = exc
-    return cache[name]
+            cache[key] = exc
+    return cache[key]
 
 
 # --------------------------------------------------------------------------- #
@@ -170,6 +220,20 @@ requires = _Requires()
 # pytest hooks
 # --------------------------------------------------------------------------- #
 
+def pytest_addoption(parser):
+    group = parser.getgroup("im-pytest")
+    group.addoption(
+        "--solution", action="store_true", default=False,
+        help="run the tests against <project>_solution.py instead of <project>.py. "
+             "A teacher-side check of the reference solution; the student's "
+             "<project>.py is not read, written or touched.",
+    )
+    group.addoption(
+        "--solution-suffix", default=SOLUTION_SUFFIX, metavar="SUFFIX",
+        help=f"the filename suffix --solution looks for (default: {SOLUTION_SUFFIX})",
+    )
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
@@ -177,6 +241,40 @@ def pytest_configure(config):
         "functions/variables, and report them as not-yet-defined.",
     )
     config._im_undefined = set()
+    config._im_solution_suffix = (
+        config.getoption("--solution-suffix") if config.getoption("--solution")
+        else os.environ.get(SUFFIX_ENV, "")
+    )
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Never wander into a directory nobody asked about.
+
+    pytest builds a collector for every parent of the test file up to the
+    rootdir and then *lists* each one, so a rootdir above the working folder —
+    a stray pyproject.toml in a home directory is enough, and `-c os.devnull`
+    does it too — makes a run of one project's tests read the whole home
+    directory. That is slow at best; where one of those folders is a cloud
+    placeholder (OneDrive, Dropbox, iCloud) the stat can hang for a minute and
+    then fail, and the run dies in collection, nowhere near the student's code.
+
+    Directories that hold neither the working folder nor anything asked for on
+    the command line cannot contain the tests, so skip them. Initial paths and
+    their parents never reach this hook, so an explicit `pytest ../other/tests`
+    is unaffected. Pure path arithmetic only: touching the filesystem here is
+    the very thing being avoided.
+    """
+    try:
+        invocation = config.invocation_params.dir
+    except AttributeError:                              # pragma: no cover
+        return None
+    if collection_path == invocation:
+        return None
+    if collection_path.is_relative_to(invocation):      # somewhere below us
+        return None
+    if invocation.is_relative_to(collection_path):      # a folder we sit inside
+        return None
+    return True
 
 
 @pytest.fixture
@@ -201,6 +299,12 @@ def module(request):
 
 
 def pytest_collection_modifyitems(config, items):
+    # A student is allowed to have written none of the functions yet, so the
+    # tests for them skip. A *reference solution* is not: if it does not define
+    # a name the tests require, the name is misspelled on one side or the other,
+    # and skipping would report that as green. So in solution mode the skip is
+    # not applied and the test runs, failing with the AttributeError it deserves.
+    checking_solution = bool(solution_suffix(config))
     for item in items:
         # iter_markers (not get_closest_marker) so stacked marks — e.g. two
         # separate @requires.name decorators on one test — all count, instead
@@ -216,6 +320,8 @@ def pytest_collection_modifyitems(config, items):
         missing = [n for n in dict.fromkeys(names) if not hasattr(obj, n)]
         if missing:
             config._im_undefined.update(missing)
+            if checking_solution:
+                continue
             item.add_marker(
                 pytest.mark.skip(reason="not defined: " + ", ".join(missing))
             )
@@ -226,8 +332,12 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     undefined = sorted(getattr(config, "_im_undefined", ()) or [])
     if undefined:
         tr.write_line("")
-        tr.write_line("Test script could not find the following functions,", red=True)
-        tr.write_line("which are either misspelled or not defined:", red=True)
+        if solution_suffix(config):
+            tr.write_line("The reference solution does not define the following", red=True)
+            tr.write_line("names, which the test file requires:", red=True)
+        else:
+            tr.write_line("Test script could not find the following functions,", red=True)
+            tr.write_line("which are either misspelled or not defined:", red=True)
         tr.write_line("")
         for n in undefined:
             tr.write_line(n, red=True)
