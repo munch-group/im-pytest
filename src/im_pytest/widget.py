@@ -165,33 +165,54 @@ class TestResultWidget(anywidget.AnyWidget):
     traceback = traitlets.Unicode("").tag(sync=True)
 
     def __init__(self, report: Report):
-        super().__init__()
-        self.layout.width = "100%"
-        self.project = report.project
+        # Work the report out into locals first, then hand the whole lot to
+        # super().__init__() as kwargs. This is load-bearing, not style:
+        # ipywidgets' Widget.__init__ applies kwargs to the traits and only then
+        # calls open(), which publishes comm_open carrying get_state(). Assigning
+        # them afterwards instead (as this did) left comm_open advertising the
+        # empty defaults and pushed the entire report out as seven separate
+        # `update` comm messages -- which the frontend drops for the first
+        # anywidget of a browser session, while it is still asynchronously
+        # loading the anywidget package and this widget's `_esm`: the comm's
+        # message handler is not attached until that load resolves. The panel
+        # then rendered from the defaults -- no checks, no summary, and `ok`
+        # defaulting to True -- and never recovered, because no `change:` event
+        # follows for render()'s listener to catch. A student's first `check()`
+        # of a session showed an empty result panel; the next one was fine.
+        # `layout` goes in the same way, for the same reason: constructing it
+        # from a dict here means the Layout sub-widget's own comm_open already
+        # carries the width, rather than an update chasing it.
         if report.collect_error is not None:
-            self.results = [{"name": "the tests could not be started", "status": ERROR,
-                             "message": report.collect_error}]
-            self.summary = "Something stopped pytest before it reached your code."
-            self.ok = False
+            results = [{"name": "the tests could not be started", "status": ERROR,
+                        "message": report.collect_error}]
+            summary = "Something stopped pytest before it reached your code."
+            ok = False
         elif report.import_error is not None:
-            self.results = [{"name": report.import_error, "status": ERROR,
-                             "message": "Your code could not be run — see the terminal output below."}]
-            self.summary = "Fix the error below, then run the checks again."
-            self.ok = False
+            results = [{"name": report.import_error, "status": ERROR,
+                        "message": "Your code could not be run — see the terminal output below."}]
+            summary = "Fix the error below, then run the checks again."
+            ok = False
         else:
-            self.results = [{"name": o.name, "status": o.status, "message": o.message}
-                            for o in report.outcomes]
+            results = [{"name": o.name, "status": o.status, "message": o.message}
+                       for o in report.outcomes]
             if report.ok:
-                self.summary = f"All {report.passed} checks passed — nice work!"
+                summary = f"All {report.passed} checks passed — nice work!"
             else:
                 bits = f"{report.passed} passed, {report.failed} to fix"
                 if report.undefined:
                     bits += f", {len(report.undefined)} not defined"
-                self.summary = bits
-            self.ok = report.ok
-        self.undefined = list(report.undefined)
-        self.stdout = report.stdout
-        self.traceback = report.traceback
+                summary = bits
+            ok = report.ok
+        super().__init__(
+            layout={"width": "100%"},
+            project=report.project,
+            results=results,
+            summary=summary,
+            ok=ok,
+            undefined=list(report.undefined),
+            stdout=report.stdout,
+            traceback=report.traceback,
+        )
 
 
 def _show(report: Report) -> None:

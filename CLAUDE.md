@@ -72,6 +72,55 @@ a ~400-line per-file `unittest` harness from the old course.
   pytest exit code with no outcomes into a `collect_error`; without it an empty
   report satisfies "no failures, no undefined names" and renders as all-clear.
 - Grade/auto-marking mode is deferred.
+- **The report must ship in `comm_open`, not follow-up `update`s.**
+  `TestResultWidget.__init__` works the report out into locals and hands the
+  whole lot to `super().__init__()` as kwargs. This is load-bearing, not style:
+  `ipywidgets.Widget.__init__` applies kwargs to the traits and only then calls
+  `open()`, which publishes `comm_open` carrying `get_state()`. Assigning them
+  afterwards (as it originally did) left `comm_open` advertising the empty
+  defaults and pushed the entire report out as seven separate `update` messages
+  -- which the frontend drops for the *first* anywidget of a browser session,
+  while it is still asynchronously loading the anywidget package and this
+  widget's `_esm`: the comm's message handler is not attached until that load
+  resolves. A student's first `check()` of a session then drew an empty panel
+  and never recovered, since no `change:` event follows for `render()`'s
+  listener to catch. **`ok` is the sharp edge**: it defaults to `True`, so the
+  lost update leaves the summary bar styled in the pass colour on a run that
+  failed. `layout` is built from a dict in the same call so the Layout
+  sub-widget's own `comm_open` carries the width rather than an update chasing
+  it. `test/test_widget.py` pins all of this across all three report shapes
+  (normal, `collect_error`, `import_error`) -- it spies on
+  `ipywidgets.Widget.open`, the call that actually creates the comm, filtered to
+  this widget because it fires for `layout` too. `steps-widget`,
+  `puzzle-widget`, `turtle-widget`, `sandbox-widget` and `codelens-widget` all
+  carry the same fix.
+- **`pyproject.toml` carries a `[tool.pytest.ini_options]` table -- keep it.**
+  A `pyproject.toml` without that table is not a config file as far as pytest is
+  concerned, so pytest keeps walking *up* the tree looking for one and adopts the
+  first it finds. On a machine with a stray `pyproject.toml` carrying that table
+  in the home directory (which is how this was found), rootdir became
+  `/Users/<name>`: `confcutdir` defaults to rootdir, so conftest collection then
+  spanned the entire home directory, and one unresponsive path in it -- a
+  cloud-sync folder whose `stat` hangs -- failed the run with
+  `TimeoutError: [Errno 60] Operation timed out` before a single test was
+  collected. That home file's `addopts` and `testpaths` applied here too. The
+  symptom looks nothing like its cause, and it moves from machine to machine, so
+  the two lines are not optional. Every sibling widget repo has them.
+- **`install-dev` is a snapshot install, not an editable one.** The task is
+  `pip install --no-build-isolation --force-reinstall --no-deps .` -- no `-e` --
+  so the copy under `site-packages` freezes at the moment it was run, and the
+  test suite imports *that*, not `src/`. An env left on an old install produces
+  failures that belong to code no longer in the tree (this is real: the env sat
+  at 0.1.21 against a 0.1.32 source, and ten tests failed for reasons that had
+  been fixed long before). Re-run `pixi run install-dev` after editing `src/`,
+  and suspect it first when a failure makes no sense against the code in front
+  of you.
+- **`test/test_dummy.py` is not part of the suite** -- it is a scratch file of
+  pytest's own documentation examples (`# %% [markdown]` cells about writing
+  assert statements), kept as notes. It tests nothing here and imports `numpy`,
+  which is not a dependency, so collecting it aborted the entire run. It is
+  listed in `test/conftest.py`'s `collect_ignore` alongside the `fixtures/*`
+  glob, rather than being renamed or deleted.
 
 ## Course integration status
 

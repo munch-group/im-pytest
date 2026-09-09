@@ -45,6 +45,19 @@ include-package-data = true
 where = ["src"]
 exclude = ["test*"]
 
+# Anchors pytest's rootdir to this repo. Without a [tool.pytest.ini_options]
+# table here, a pyproject.toml is *not* a config file as far as pytest is
+# concerned, so it keeps walking up the tree looking for one -- and adopts the
+# first it meets. On a machine with a stray pyproject.toml carrying this table
+# in the home directory, that made rootdir /Users/<name>: confcutdir defaults to
+# rootdir, so conftest collection then spanned the whole home directory, and a
+# single unresponsive path in it (a cloud-sync folder that stats slowly) failed
+# the run with a TimeoutError before a single test was collected. Its addopts
+# and testpaths applied to this repo too. Every sibling widget repo carries the
+# same two lines for the same reason.
+[tool.pytest.ini_options]
+testpaths = ["test"]
+
 [tool.pixi.workspace]
 channels = ["conda-forge", "munch-group"]
 platforms = ["osx-arm64", "osx-64", "win-64", "linux-64"]
