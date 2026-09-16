@@ -17,7 +17,11 @@ im_pytest.check("translationproject")   # friendly panel: ✓/✗ per function
    `translationproject.py` and renders a beginner-friendly panel: a green ✓ or
    red ✗ per function, the failing assertion, and a "functions not defined yet"
    note. No test source, no traceback. For the early weeks, before students know
-   what a test is.
+   what a test is. `--nice` goes one step further and words a failed
+   `assert module.f(...) == value` as `f(...) should return <value> but returns
+   <what it returned>`, in place of pytest's diff: `%%test translationproject
+   --nice`, `check("translationproject", nice=True)` or
+   `pytest-check --nice translationproject`.
 2. **Raw pytest** — `pytest test_translationproject.py`. The *same* file, now run
    with the real tool so students learn to read pytest's output. The `module`
    fixture, the `requires` marker and the not-defined banner are provided

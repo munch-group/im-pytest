@@ -11,8 +11,12 @@ separates the two kinds of outcome the widget shows differently:
 """
 from __future__ import annotations
 
+import ast
 import io
+import linecache
 import os
+import re
+import sys
 import types
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -33,14 +37,111 @@ def _clean_name(nodeid: str) -> str:
     return func[5:] if func.startswith("test_") else func
 
 
+# pytest words parts of an assertion explanation as instructions for its own
+# command line: "Use -v to get more diff" on a line of its own, and ", use -vv to
+# show" tacked onto "Omitting 2 identical items" and "...Full output truncated
+# (15 lines hidden)". Nothing a student types reaches pytest's command line from
+# check() or %%test, so the instructions go; the facts they hang off stay.
+_FLAG_HINT_LINE = re.compile(r"^\s*Use -v+ to get .* diff\s*$")
+_FLAG_HINT_SUFFIX = re.compile(r",\s*use '?-v+'? to show")
+
+
 def _assert_message(report) -> str:
     lr = getattr(report, "longrepr", None)
     crash = getattr(lr, "reprcrash", None)
     msg = getattr(crash, "message", None) or (str(lr) if lr else "")
-    lines = [ln for ln in msg.splitlines() if ln.strip()]
+    lines = [_FLAG_HINT_SUFFIX.sub("", ln) for ln in msg.splitlines()
+             if ln.strip() and not _FLAG_HINT_LINE.match(ln)]
     if len(lines) > 6:
-        lines = lines[:6] + ["... (run `pytest` for the full diff)"]
+        # No line count: what is cut can be pytest's own "(11 lines hidden)",
+        # so counting the lines cut here would understate what is missing.
+        lines = lines[:6] + ["... (more not shown)"]
     return "\n".join(lines)
+
+
+# --- %%test --nice --------------------------------------------------------- #
+# Instead of pytest's explanation of *how* two values differ ("Right contains 4
+# more items, first extra item: 'MM*'"), say what the student's function was
+# asked and what it answered:
+#
+#     find_candidate_proteins("AAAATGATGTAGAAAATGATGTAGAAA") should return
+#     ['MM*', 'M*', 'MM*', 'M*'] but returns []
+#
+# The function name and its arguments are read from the failing assert in the
+# test file, as written there; the two values are the objects pytest compared,
+# handed over by its pytest_assertrepr_compare hook. Only an assert of the form
+# `module.f(...) == value` (either way round, or `is`) says this. Anything else --
+# isinstance(...), len(...), module.codon_map == ..., an assert inside a helper,
+# an assert with its own message -- keeps pytest's explanation.
+
+_NICE_OPS = {ast.Eq: "==", ast.Is: "is"}
+# Long enough for every literal expected value in the course's test files (the
+# longest is 80 characters) and for orfproject's list of eight proteins (187).
+_NICE_REPR_MAX = 300
+
+
+def _nice_repr(obj) -> str:
+    # Not pytest's saferepr: that stops a list at 6 items and a dict at 4 whatever
+    # their length, so a returned list that is wrong only in its last two items
+    # printed exactly like the expected one. Shortened by characters instead.
+    try:
+        text = repr(obj)
+    except Exception as exc:                            # noqa: BLE001
+        return f"<{type(obj).__name__} object; repr() raised {type(exc).__name__}>"
+    if len(text) > _NICE_REPR_MAX:
+        half = (_NICE_REPR_MAX - 3) // 2
+        text = text[:half] + "..." + text[-half:]
+    return text
+
+
+def _failing_assert(tb, test_file):
+    """The ``assert`` statement the failure was raised at, and its file's source."""
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    filename = tb.tb_frame.f_code.co_filename
+    if os.path.abspath(filename) != os.path.abspath(str(test_file)):
+        return None, ""
+    # The file as it is now, not as linecache last saw it: _forget_test_module
+    # has pytest import the test file afresh on every run, so this is the text
+    # the failing code was compiled from.
+    linecache.checkcache(filename)
+    source = "".join(linecache.getlines(filename))
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None, ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert) and node.lineno <= tb.tb_lineno <= node.end_lineno:
+            return node, source
+    return None, ""
+
+
+def _call_text(call, source) -> str:
+    """``find_orfs("ATGTAA")`` for ``module.find_orfs("ATGTAA")``, as the test wrote it."""
+    text = ast.get_source_segment(source, call)
+    func = ast.get_source_segment(source, call.func)
+    if text and func and "\n" not in text:
+        return call.func.attr + text[len(func):]
+    # a call spread over several lines: one line, at the cost of the test's own quoting
+    return call.func.attr + ast.unparse(call)[len(ast.unparse(call.func)):]
+
+
+def _nice_sentence(assert_node, source, compared) -> str | None:
+    test = assert_node.test
+    if (assert_node.msg is not None or not isinstance(test, ast.Compare)
+            or len(test.ops) != 1 or compared is None):
+        return None
+    op, left, right = compared
+    if _NICE_OPS.get(type(test.ops[0])) != op:
+        return None
+    for side, actual, expected in ((test.left, left, right),
+                                   (test.comparators[0], right, left)):
+        if (isinstance(side, ast.Call) and isinstance(side.func, ast.Attribute)
+                and isinstance(side.func.value, ast.Name)
+                and side.func.value.id == "module"):          # the plugin's fixture
+            return (f"{_call_text(side, source)} should return {_nice_repr(expected)}"
+                    f" but returns {_nice_repr(actual)}")
+    return None
 
 
 def _tb_formatter():
@@ -95,19 +196,30 @@ def format_traceback(exc_type, exc_value, exc_tb, student_file=None) -> str:
 class _Capture:
     """Records outcomes, student prints and a code-error traceback for one run."""
 
-    def __init__(self, student_file=None):
+    def __init__(self, student_file=None, nice=False):
         self.outcomes: list[Outcome] = []
         self.config = None
         self.student_file = student_file
+        self.nice = nice
         self.stdout_parts: list[str] = []
         self.traceback = ""
         self.collect_error = ""
         self.exit_code = 0
         self.pytest_output = ""
         self._done: set[str] = set()
+        self._compared = None     # (op, left, right) of this test's failing comparison
 
     def pytest_configure(self, config):
         self.config = config
+
+    def pytest_runtest_logstart(self, nodeid):
+        self._compared = None
+
+    def pytest_assertrepr_compare(self, op, left, right):
+        # pytest calls this as a comparison in an assert fails, just before the
+        # AssertionError. Returning None leaves the explanation to pytest.
+        if self.nice:
+            self._compared = (op, left, right)
 
     def _record(self, name, status, message=""):
         if name in self._done:
@@ -132,7 +244,13 @@ class _Capture:
             return
         name = _clean_name(report.nodeid)
         if issubclass(exc.type, AssertionError):
-            self._record(name, FAIL, _assert_message(report))
+            message = _assert_message(report)
+            if self.nice:
+                assert_node, source = _failing_assert(exc.tb, node.path)
+                sentence = assert_node and _nice_sentence(assert_node, source, self._compared)
+                if sentence:
+                    message = message.split("\n", 1)[0] + "\n  " + sentence
+            self._record(name, FAIL, message)
         else:
             # the student's code raised -> show it in the terminal-output area
             self._record(name, ERROR, f"raised {exc.type.__name__}: {exc.value}")
@@ -153,8 +271,33 @@ class _Capture:
                 self._record(_clean_name(report.nodeid), PASS)
 
 
-def _run_pytest(test_path, student_file, failfast, suffix="") -> _Capture:
-    cap = _Capture(student_file=student_file)
+def _forget_test_module(test_path) -> None:
+    """Drop the test file's module from ``sys.modules`` so pytest imports it afresh.
+
+    pytest imports a test file with ``importlib.import_module``, which hands back
+    whatever ``sys.modules`` already holds under that name. In-process -- in a
+    notebook kernel, where ``check()`` and ``%%test`` run -- that was the test
+    file as it stood on the session's first run: an edit to it went unseen until
+    the kernel restarted, and a ``test_<project>.py`` of the same name from
+    another folder failed as an import-file mismatch. (pytest already does this
+    for ``conftest.py``.)
+    """
+    target = os.path.realpath(str(test_path))
+    base = os.path.basename(target)
+    for name, mod in list(sys.modules.items()):
+        try:
+            file = getattr(mod, "__file__", None)
+        except Exception:                               # noqa: BLE001 - odd lazy modules
+            continue
+        if not file or os.path.basename(file) != base:
+            continue
+        if name == base[:-3] or os.path.realpath(file) == target:
+            del sys.modules[name]
+
+
+def _run_pytest(test_path, student_file, failfast, suffix="", nice=False) -> _Capture:
+    cap = _Capture(student_file=student_file, nice=nice)
+    _forget_test_module(test_path)
     # rootdir and confcutdir are pinned to the folder holding the test file.
     # Left to itself pytest walks *up* from the test file, building a collector
     # for every parent inside confcutdir and listing each one; `-c os.devnull`
@@ -162,8 +305,12 @@ def _run_pytest(test_path, student_file, failfast, suffix="") -> _Capture:
     # and the listing takes in the whole home directory on the way. Pinned, a
     # run of one project's tests looks at exactly one folder: the project's own.
     here = os.path.dirname(os.path.abspath(str(test_path))) or os.getcwd()
+    # --color=no, because ipykernel sets FORCE_COLOR=1 in the kernel's own
+    # environment: pytest then takes a StringIO for a colour terminal and runs
+    # every value in an assertion diff through pygments, and the escape codes
+    # land in the check message, which is plain text in the widget and the CLI.
     args = [str(test_path), "-c", os.devnull, "--rootdir", here, "--confcutdir", here,
-            "-p", "no:cacheprovider", "-q", "--no-header"]
+            "-p", "no:cacheprovider", "-q", "--no-header", "--color=no"]
     if failfast:
         args.append("-x")
     if suffix:
@@ -200,12 +347,16 @@ def _build_report(project, cap, pre_stdout="") -> Report:
 
 
 def run(test_path: str, *, project: str = "", failfast: bool = True,
-        solution: bool | str = False) -> Report:
+        solution: bool | str = False, nice: bool = False) -> Report:
     """Run ``test_path`` against the student's ``<project>.py`` in the cwd.
 
     With ``solution=True`` the reference ``<project>_solution.py`` is run
     instead (or ``solution="<suffix>"`` for another suffix). The student's
     ``<project>.py`` is not read and not written.
+
+    With ``nice=True`` a failed ``assert module.f(...) == value`` is explained as
+    "f(...) should return <value> but returns <what it returned>" instead of
+    pytest's diff.
     """
     project = project or _plugin.student_module_name(os.path.basename(test_path).rsplit(".", 1)[0])
     suffix = _plugin.SOLUTION_SUFFIX if solution is True else (solution or "")
@@ -237,7 +388,8 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
     if not already_injected:
         _plugin._INJECTED[project] = module
     try:
-        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, suffix)
+        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, suffix,
+                          nice=nice)
     finally:
         if not already_injected:
             _plugin._INJECTED.pop(project, None)
@@ -245,11 +397,16 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
 
 
 def run_injected(project: str, module: types.ModuleType, test_path: str, *,
-                 pre_stdout: str = "", failfast: bool = True) -> Report:
-    """Run against an in-notebook module built by the ``%%test`` cell magic."""
+                 pre_stdout: str = "", failfast: bool = True, nice: bool = False) -> Report:
+    """Run against an in-notebook module built by the ``%%test`` cell magic.
+
+    With ``nice=True`` (``%%test <project> --nice``) a failed
+    ``assert module.f(...) == value`` is explained as "f(...) should return
+    <value> but returns <what it returned>" instead of pytest's diff.
+    """
     _plugin._INJECTED[project] = module
     try:
-        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast)
+        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, nice=nice)
     finally:
         _plugin._INJECTED.pop(project, None)
     return _build_report(project, cap, pre_stdout=pre_stdout)

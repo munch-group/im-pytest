@@ -4,6 +4,7 @@ Each case runs in a *fresh subprocess* from a temp working folder — exactly ho
 student invokes it — rather than nesting pytest inside pytest.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,121 @@ def test_prints_are_captured(tmp_path):
     d = _run(tmp_path, "translationproject_prints.py")
     assert d["ok"] and d["passed"] == 4
     assert "splitting" in d["stdout"] and not d["has_tb"]
+
+
+# --- what a failing check says --------------------------------------------- #
+
+_MESSAGES_TESTS = '''
+from im_pytest import requires
+
+@requires("f")
+def test_list(module):
+    assert module.f() == ["MM*", "M*", "MM*", "M*"]
+
+@requires("f")
+def test_dict(module):
+    assert {"TTT": "F", "TTC": "F", "TAA": "X"} == {"TTT": "F", "TTC": "F", "TAA": "*"}
+
+@requires("f")
+def test_text(module):
+    assert "ATG" * 30 + "TAA" == "ATG" * 30 + "TAG"
+
+@requires("f")
+def test_long(module):
+    assert {k: "x" for k in "ABCDEFGHIJKLMNOP"} == {k: "y" for k in "ABCDEFGHIJKLMNOP"}
+'''
+
+_MESSAGES_SNIPPET = (
+    "import json;from im_pytest import run;"
+    "r=run('test_msgs.py',project='msgs',failfast=False);"
+    "print(json.dumps({o.name:o.message for o in r.outcomes}))"
+)
+
+
+def _messages(tmp_path):
+    (tmp_path / "test_msgs.py").write_text(_MESSAGES_TESTS)
+    (tmp_path / "msgs.py").write_text("def f():\n    return []\n")
+    # ipykernel sets FORCE_COLOR=1 in the kernel's own environment, which is
+    # where check() and %%test run; the escape codes only appeared there.
+    env = {k: v for k, v in os.environ.items() if k not in ("PY_COLORS", "NO_COLOR")}
+    env["FORCE_COLOR"] = "1"
+    proc = subprocess.run([sys.executable, "-c", _MESSAGES_SNIPPET], cwd=tmp_path,
+                          env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_check_messages_have_no_escape_codes_in_a_kernel(tmp_path):
+    msgs = _messages(tmp_path)
+    assert set(msgs) == {"list", "dict", "text", "long"}
+    for name, msg in msgs.items():
+        assert "\x1b" not in msg, f"{name}: {msg!r}"
+    assert "first extra item: 'MM*'" in msgs["list"]
+
+
+def test_check_messages_do_not_tell_students_to_pass_pytest_flags(tmp_path):
+    # Nothing typed in check() or %%test reaches pytest's command line, so
+    # "Use -v to get more diff" is an instruction nobody can follow -- and a
+    # student who tries `%%test orfproject -v` gets the same message back.
+    msgs = _messages(tmp_path)
+    for name, msg in msgs.items():
+        assert "-v" not in msg and "pytest" not in msg, f"{name}: {msg!r}"
+    # the facts the instructions were attached to stay
+    assert "Right contains 4 more items" in msgs["list"]
+    assert "Omitting 2 identical items" in msgs["dict"]
+    assert "identical leading characters in diff" in msgs["text"]
+    assert msgs["long"].endswith("... (more not shown)")
+
+
+# --- the test file is read afresh on every run ----------------------------- #
+
+_EDIT_TESTS = '''
+from im_pytest import requires
+
+@requires("f")
+def test_f(module):
+    assert module.f(1) == 1
+'''
+
+# three runs in one process, as a kernel does them
+_EDIT_SNIPPET = '''
+import json, os
+from im_pytest import run
+
+def outcome(folder):
+    r = run(os.path.join(folder, "test_edit.py"), project="edit", nice=True)
+    return r.collect_error or [o.status + ": " + o.message for o in r.outcomes]
+
+first = outcome("a")
+source = open("a/test_edit.py").read()
+with open("a/test_edit.py", "w") as fh:
+    fh.write("# edited\\n\\n" + source.replace("== 1", "== 22"))
+edited = outcome("a")
+other = outcome("b")
+print(json.dumps({"first": first, "edited": edited, "other": other}))
+'''
+
+
+def test_the_test_file_is_imported_afresh_on_every_run(tmp_path):
+    # pytest.main in-process got the test module back from sys.modules: an edit
+    # to the test file went unseen until the kernel restarted, and a same-named
+    # test file in another folder failed to import at all.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "test_edit.py").write_text(_EDIT_TESTS)
+    (tmp_path / "b" / "test_edit.py").write_text(_EDIT_TESTS.replace("f(1) == 1", "f(3) == 4"))
+    (tmp_path / "edit.py").write_text("def f(x):\n    return x\n")
+    proc = subprocess.run([sys.executable, "-c", _EDIT_SNIPPET], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    d = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    assert d["first"] == ["pass: "]
+    # the edit is what ran -- and --nice read the same lines that ran, moved down two
+    assert d["edited"] == ["fail: AssertionError: assert 1 == 22\n"
+                           "  f(1) should return 22 but returns 1"]
+    assert d["other"] == ["fail: AssertionError: assert 3 == 4\n"
+                          "  f(3) should return 4 but returns 3"]
 
 
 _MISMATCH_SNIPPET = (

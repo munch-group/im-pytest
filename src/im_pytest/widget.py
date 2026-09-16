@@ -233,7 +233,7 @@ def _show(report: Report) -> None:
 
 
 def check(project: str, *, tests: str | None = None, failfast: bool = True,
-          solution: bool | str = False) -> None:
+          solution: bool | str = False, nice: bool = False) -> None:
     """Test the student's ``<project>.py`` in the working folder.
 
     >>> check("translationproject")
@@ -241,13 +241,22 @@ def check(project: str, *, tests: str | None = None, failfast: bool = True,
     ``solution=True`` runs the reference ``<project>_solution.py`` instead — a
     teacher-side check, and the way a ``solution_walkthrough.ipynb`` can prove
     itself against the tests it is a walkthrough of.
+
+    ``nice=True`` explains a failed ``assert module.f(...) == value`` as
+    "f(...) should return <value> but returns <what it returned>" instead of
+    pytest's description of how the two values differ.
     """
     test_path = tests or resolve_test(project)
-    _show(run(test_path, project=project, failfast=failfast, solution=solution))
+    _show(run(test_path, project=project, failfast=failfast, solution=solution, nice=nice))
 
 
 def register_test_magic(ipython=None):
-    """Register the ``%%test <project>`` cell magic (idempotent)."""
+    """Register the ``%%test <project> [--nice]`` cell magic (idempotent).
+
+    ``--nice`` explains a failed ``assert module.f(...) == value`` as
+    "f(...) should return <value> but returns <what it returned>" instead of
+    pytest's description of how the two values differ.
+    """
     try:
         from IPython.core.magic import register_cell_magic  # noqa: F401
     except Exception:
@@ -257,10 +266,16 @@ def register_test_magic(ipython=None):
         return
 
     def test(line, cell):
-        project = line.strip().split()[0] if line.strip() else ""
-        if not project:
-            print("Usage: %%test <projectname>")
+        words = line.split()
+        names = [w for w in words if not w.startswith("-")]
+        options = [w for w in words if w.startswith("-")]
+        # An option this magic does not know is refused rather than ignored, so a
+        # typo like --nicer does not quietly run the checks without it.
+        if not names or any(o != "--nice" for o in options):
+            print("Usage: %%test <projectname> [--nice]")
             return
+        project = names[0]
+        nice = "--nice" in options
         test_path = resolve_test(project)
         filename = f"<{project}>"
         module = types.ModuleType(project)
@@ -279,7 +294,7 @@ def register_test_magic(ipython=None):
                          stdout=buf.getvalue().rstrip("\n"))
             _show(rep)
             return
-        rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue())
+        rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue(), nice=nice)
         ip.user_ns.update({k: v for k, v in module.__dict__.items() if not k.startswith("__")})
         _show(rep)
 

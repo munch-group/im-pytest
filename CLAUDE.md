@@ -33,8 +33,8 @@ a ~400-line per-file `unittest` harness from the old course.
   only when the student's code printed or raised a non-assertion error, a separate
   **Terminal output** card with their prints and a colored, student-focused
   traceback — mirroring the `%%exercise` widget.
-- `cli.py` — the `pytest-check` console entry point, including `--solution` and
-  the `--sweep <dir>` pre-term check over every project.
+- `cli.py` — the `pytest-check` console entry point, including `--solution`,
+  `--nice` and the `--sweep <dir>` pre-term check over every project.
 - `resources.py` — locate `test_<project>.py` (working folder or `IM_PROJECT_TESTS`).
 
 ## Conventions & gotchas
@@ -54,6 +54,15 @@ a ~400-line per-file `unittest` harness from the old course.
   is safe to have globally installed.
 - Test the runner in a **fresh subprocess** (see `test/test_runner.py`), never by
   nesting `pytest.main` inside an outer pytest run.
+- **The test file is re-imported on every run.** pytest imports test modules with
+  `importlib.import_module`, so an in-process `pytest.main` gets back whatever
+  `sys.modules` holds: in a kernel, the test file as it was on the first run.
+  `runner._forget_test_module` drops it first. `--nice` depends on this — it reads
+  the assert's source from the file, which must be the code that ran.
+- **`--nice`** (`%%test … --nice`, `check(nice=True)`, `pytest-check --nice`)
+  rewrites a failed `assert module.f(...) == value` / `is value` as "f(...) should
+  return X but returns Y": call text from the assert's AST in the test file, values
+  from the `pytest_assertrepr_compare` hook. Any other assert keeps pytest's text.
 - **Solution mode** (`--solution`, `IM_SOLUTION_SUFFIX`, `run(solution=True)`) is
   one suffix on the filename `plugin.import_student` opens: `<project>_solution.py`
   instead of `<project>.py`, under the same module name. It must never fall back

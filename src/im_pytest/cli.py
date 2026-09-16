@@ -2,9 +2,12 @@
 
     pytest-check translationproject.py     # point at your solution file
     pytest-check translationproject        # or just the project name
+    pytest-check --nice translationproject # "f(...) should return X but returns Y"
 
 Finds ``test_<project>.py`` (in the working folder or IM_PROJECT_TESTS), runs it
-against your solution, and prints friendly output.
+against your solution, and prints friendly output. With ``--nice``, a failed
+``assert module.f(...) == value`` is explained as what the function should
+return and what it returned, instead of pytest's diff.
 
 Two teacher-side forms run the *reference* solution instead of the student stub,
 so a broken test file is caught before a class meets it:
@@ -88,6 +91,7 @@ def main(argv=None) -> int:
     target = positional[0]
     all_tests = "--all" in flags
     solution = "--solution" in flags
+    nice = "--nice" in flags
 
     project = os.path.basename(target)
     if project.endswith(".py"):
@@ -104,7 +108,8 @@ def main(argv=None) -> int:
         print(exc)
         return 2
 
-    report = run(test_path, project=project, failfast=not all_tests, solution=solution)
+    report = run(test_path, project=project, failfast=not all_tests, solution=solution,
+                 nice=nice)
     print(report.to_text())
     return 0 if report.ok else 1
 
