@@ -15,7 +15,7 @@ _SNIPPET = (
     "import json;from im_pytest import run;"
     "r=run('test_translationproject.py',project='translationproject',failfast=False);"
     "print(json.dumps({'ok':r.ok,'passed':r.passed,'failed':r.failed,"
-    "'undefined':sorted(r.undefined),'import_error':bool(r.import_error),"
+    "'undefined':sorted(r.undefined),'import_error':r.import_error,"
     "'stdout':r.stdout,'has_tb':bool(r.traceback),"
     "'fails':[o.name for o in r.outcomes if o.status=='fail'],"
     "'errors':[o.name for o in r.outcomes if o.status=='error']}))"
@@ -50,6 +50,19 @@ def test_incomplete_reports_undefined(tmp_path):
 def test_broken_solution_reports_import_error(tmp_path):
     d = _run(tmp_path, "translationproject_broken.py")
     assert d["import_error"] and not d["ok"]
+
+
+def test_missing_solution_file_reports_naming_hint(tmp_path):
+    # only the test file is present — e.g. the student renamed or never saved
+    # translationproject.py, or renamed the test file itself away from its pair
+    shutil.copy(FIX / "test_translationproject.py", tmp_path / "test_translationproject.py")
+    proc = subprocess.run([sys.executable, "-c", _SNIPPET], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    d = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert not d["ok"]
+    assert "translationproject.py" in d["import_error"]
+    assert "same folder" in d["import_error"]
 
 
 def test_runtime_error_goes_to_terminal(tmp_path):

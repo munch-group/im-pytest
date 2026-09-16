@@ -38,6 +38,8 @@ pytest-check = "im_pytest.cli:main"
 [project.entry-points.pytest11]
 im_pytest = "im_pytest.plugin"
 
+[tool.pytest.ini_options]
+
 [tool.setuptools]
 include-package-data = true
 

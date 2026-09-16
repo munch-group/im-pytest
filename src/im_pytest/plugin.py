@@ -171,9 +171,25 @@ def import_student(name: str, cwd: str | None = None, *, suffix: str = "") -> ty
     try:
         return importlib.import_module(name)
     except ModuleNotFoundError as exc:
-        if exc.name == name:
-            raise SolutionNotFoundError(name, cwd) from None
-        raise  # a *different* missing import, e.g. a real dependency of the module
+        if exc.name != name:
+            raise  # a *different* module went missing during the import; not ours to explain
+        raise ModuleNotFoundError(
+            _missing_file_message(name, cwd)
+        ) from None
+
+
+def _missing_file_message(name: str, cwd: str) -> str:
+    return (
+        f'Could not find a file called "{name}.py" next to this test file '
+        f"(looked in {cwd}).\n\n"
+        f'pytest expects the test file and the file with your functions to share '
+        f'the same name after "test_" — e.g. "test_{name}.py" pairs with "{name}.py". '
+        f"Check that:\n"
+        f'  - your functions file is named exactly "{name}.py"\n'
+        f"  - it is saved in the same folder as this test file\n"
+        f"  - if you renamed the test file itself, rename it back (or rename your "
+        f"functions file to match) so the two names line up again"
+    )
 
 
 def _get_student(config, name):
