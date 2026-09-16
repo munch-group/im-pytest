@@ -26,7 +26,7 @@ print(json.dumps({
     "printed": printed.getvalue(),
     "names": sorted(k for k in ip.user_ns if not k.startswith("_")),
     "reports": [{
-        "project": r.project, "ok": r.ok, "undefined": r.undefined, "stdout": r.stdout,
+        "project": r.project, "tests_from": r.tests_from, "ok": r.ok, "undefined": r.undefined, "stdout": r.stdout,
         "import_error": r.import_error, "collect_error": r.collect_error,
         "traceback": r.traceback,
         "outcomes": {o.name: [o.status, o.message] for o in r.outcomes},
@@ -103,6 +103,23 @@ def test_the_cell_is_what_the_tests_get(tests_folder):
         "fail", "AssertionError: assert 'x' == 'xx'\n  g('x') should return 'xx' but returns 'x'"]
 
 
+@pytest.mark.parametrize("line, tests_from", [
+    ("tests", "tests"),
+    ("tests/sub/test_b.py", "test_b.py"),
+    ("../outside", "outside"),
+    (".", "current folder"),
+])
+def test_the_header_names_where_the_tests_were_read(tests_folder, line, tests_from):
+    d = _magic(tests_folder, line)
+    assert [r["tests_from"] for r in d["reports"]] == [tests_from]
+
+
+def test_the_header_names_a_project_or_the_cell(tmp_path):
+    (tmp_path / "test_proj.py").write_text("def test_x(module):\n    pass\n")
+    assert _only_report(_magic(tmp_path, "proj"))["tests_from"] == "proj"
+    assert _only_report(_magic(tmp_path, "", cell="def test_y():\n    pass\n"))["tests_from"] == "this cell"
+
+
 def test_a_project_name_wins_over_a_folder_of_the_same_name(tmp_path):
     (tmp_path / "proj").mkdir()
     (tmp_path / "proj" / "test_inside.py").write_text("def test_inside():\n    pass\n")
@@ -152,7 +169,8 @@ def test_fails():
 
 
 def test_a_cell_with_its_own_tests(tmp_path):
-    r = _only_report(_magic(tmp_path, "", cell=_CELL))
+    # --no-nice, so the message is pytest's own, which shows the rewriting
+    r = _only_report(_magic(tmp_path, "--no-nice", cell=_CELL))
     assert r["project"] == "cell"
     assert r["outcomes"] == {
         "passes": ["pass", ""],
@@ -166,8 +184,8 @@ def test_a_cell_with_its_own_tests(tmp_path):
     assert not r["ok"]
 
 
-def test_a_cell_with_its_own_tests_nice(tmp_path):
-    r = _only_report(_magic(tmp_path, "--nice", cell=_CELL))
+def test_a_cell_with_its_own_tests_is_nice_by_default(tmp_path):
+    r = _only_report(_magic(tmp_path, "", cell=_CELL))
     assert r["outcomes"]["fails"] == ["fail", "assert 2 == 3\n  f(1) should return 3 but returns 2"]
 
 

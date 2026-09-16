@@ -1,5 +1,5 @@
-"""``--nice`` (``%%test``, ``check()``, ``pytest-check``): a failed
-``module.f(...) == value`` said in a sentence.
+"""A failed ``module.f(...) == value`` said in a sentence: the default in
+``%%test``, ``check()`` and ``pytest-check``, which ``--no-nice`` turns off.
 
 Same discipline as ``test_runner.py``: every case runs in a fresh subprocess from
 a temp working folder, never by nesting ``pytest.main`` inside the outer run.
@@ -205,18 +205,28 @@ def test_nice_flag_on_the_magic(tmp_path, line):
     assert "should return ['MM*', 'M*', 'MM*', 'M*'] but returns []" in report["left_call"]
 
 
-def test_magic_without_the_flag_is_unchanged(tmp_path):
-    d = _python(tmp_path, _MAGIC_SNIPPET, "shapes", _CELL)
-    [report] = d["reports"]
+def test_the_magic_is_nice_by_default(tmp_path):
+    [report] = _python(tmp_path, _MAGIC_SNIPPET, "shapes", _CELL)["reports"]
+    assert "should return ['MM*', 'M*', 'MM*', 'M*'] but returns []" in report["left_call"]
+
+
+def test_no_nice_keeps_pytests_explanation(tmp_path):
+    [report] = _python(tmp_path, _MAGIC_SNIPPET, "shapes --no-nice", _CELL)["reports"]
     assert "Right contains 4 more items" in report["left_call"]
     assert "should return" not in report["left_call"]
+
+
+@pytest.mark.parametrize("line", ["shapes --nice --no-nice", "shapes --nice --raw"])
+def test_magic_refuses_contradictory_options(tmp_path, line):
+    d = _python(tmp_path, _MAGIC_SNIPPET, line, _CELL)
+    assert d["reports"] == [] and "cannot be used together" in d["printed"]
 
 
 @pytest.mark.parametrize("line", ["shapes --nicer", "shapes -v", "shapes other"])
 def test_magic_refuses_what_it_does_not_understand(tmp_path, line):
     d = _python(tmp_path, _MAGIC_SNIPPET, line, _CELL)
     assert d["reports"] == []
-    assert d["printed"].strip() == "Usage: %%test [<project> | <test file> | <folder>] [--nice | --raw]"
+    assert d["printed"].strip() == "Usage: %%test [<project> | <test file> | <folder>] [--no-nice | --raw]"
 
 
 # check() and pytest-check read the student's shapes.py from the working folder
@@ -236,15 +246,22 @@ def _printed(tmp_path, *args):
 @pytest.mark.parametrize("args, nice", [
     (["-m", "im_pytest.cli", "--nice", "shapes.py"], True),
     (["-m", "im_pytest.cli", "shapes.py", "--nice"], True),
-    (["-m", "im_pytest.cli", "shapes.py"], False),
+    (["-m", "im_pytest.cli", "shapes.py"], True),
+    (["-m", "im_pytest.cli", "--no-nice", "shapes.py"], False),
     (["-c", "from im_pytest import check; check('shapes', nice=True)"], True),
-    (["-c", "from im_pytest import check; check('shapes')"], False),
+    (["-c", "from im_pytest import check; check('shapes')"], True),
+    (["-c", "from im_pytest import check; check('shapes', nice=False)"], False),
 ])
 def test_nice_in_check_and_pytest_check(tmp_path, args, nice):
     out = _printed(tmp_path, *args).stdout
     assert "[FAIL] left_call" in out
     assert (_SENTENCE in out) is nice
     assert ("Right contains 4 more items" in out) is not nice
+
+
+def test_pytest_check_refuses_nice_and_no_nice(tmp_path):
+    proc = _printed(tmp_path, "-m", "im_pytest.cli", "--nice", "--no-nice", "shapes.py")
+    assert proc.returncode == 2 and "cannot be used together" in proc.stdout
 
 
 def test_pytest_check_nice_still_fails_the_run(tmp_path):

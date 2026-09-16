@@ -3,8 +3,8 @@ rendered as an anywidget styled like ``script-widget``'s ``%%exercise`` output.
 
 The widget has up to two cards:
 
-* **Checks** — one ✓/✗ row per tested function, with the failing assertion, a
-  "not defined yet" note, and a summary line.
+* **TESTS - <where the tests came from>** — one ✓/✗ row per tested function,
+  with the failing assertion, a "not defined yet" note, and a summary line.
 * **Terminal output** — shown only when the student's code printed something;
   it shows their prints, like the ``%%exercise`` widget.
 
@@ -78,9 +78,9 @@ function ansiToHtml(text){
 
 function fillAncestors(el){let a=el;for(let i=0;i<4&&a;i++){a.style.width="100%";a.style.boxSizing="border-box";a=a.parentElement;}}
 
-function card(title){
+function card(title,keepCase){
   const root=document.createElement("div");root.className="imp-root";
-  const h=document.createElement("div");h.className="imp-header";h.textContent=title;root.appendChild(h);
+  const h=document.createElement("div");h.className="imp-header"+(keepCase?" imp-keep-case":"");h.textContent=title;root.appendChild(h);
   const body=document.createElement("div");body.className="imp-body";root.appendChild(body);
   return {root, body};
 }
@@ -90,8 +90,8 @@ function render({model, el}){
   const wrap=document.createElement("div");
 
   // ---- checks card ----
-  const project=model.get("project")||"tests";
-  const {root, body}=card("Checks — "+project);
+  // "TESTS - " in capitals, the name after it as written: a file name is case-sensitive
+  const {root, body}=card("TESTS - "+(model.get("tests_from")||""), true);
   (model.get("results")||[]).forEach(r=>{
     const row=document.createElement("div");row.className="imp-row";
     const mark=document.createElement("span");
@@ -137,6 +137,7 @@ _CSS = r"""
 .imp-root + .imp-root { margin-top:10px; }
 .imp-header { font-size:11.5px; font-weight:600; letter-spacing:.02em; color:#6b7280;
   text-transform:uppercase; margin:2px 4px 6px; }
+.imp-header.imp-keep-case { text-transform:none; }
 .imp-body { background:#ffffff; border-radius:4px; padding:10px 14px; }
 .imp-row { display:flex; gap:8px; align-items:baseline; padding:2px 0; }
 .imp-mark { font-weight:700; }
@@ -162,6 +163,7 @@ class TestResultWidget(anywidget.AnyWidget):
     _css = _CSS
 
     project = traitlets.Unicode("").tag(sync=True)
+    tests_from = traitlets.Unicode("").tag(sync=True)
     results = traitlets.List(traitlets.Dict()).tag(sync=True)
     undefined = traitlets.List(traitlets.Unicode()).tag(sync=True)
     summary = traitlets.Unicode("").tag(sync=True)
@@ -211,6 +213,7 @@ class TestResultWidget(anywidget.AnyWidget):
         super().__init__(
             layout={"width": "100%"},
             project=report.project,
+            tests_from=report.tests_from or report.project,
             results=results,
             summary=summary,
             ok=ok,
@@ -260,7 +263,8 @@ def _show(report: Report, raw: bool = False) -> None:
 
 
 def check(project: str, *, tests: str | None = None, failfast: bool = True,
-          solution: bool | str = False, nice: bool = False, raw: bool = False) -> None:
+          solution: bool | str = False, nice: bool | None = None,
+          raw: bool = False) -> None:
     """Test the student's ``<project>.py`` in the working folder.
 
     >>> check("translationproject")
@@ -269,19 +273,19 @@ def check(project: str, *, tests: str | None = None, failfast: bool = True,
     teacher-side check, and the way a ``solution_walkthrough.ipynb`` can prove
     itself against the tests it is a walkthrough of.
 
-    ``nice=True`` explains a failed ``assert module.f(...) == value`` as
-    "f(...) should return <value> but returns <what it returned>" instead of
-    pytest's description of how the two values differ.
+    A failed ``assert module.f(...) == value`` is explained as "f(...) should
+    return <value> but returns <what it returned>" instead of pytest's
+    description of how the two values differ; ``nice=False`` keeps pytest's.
 
     ``raw=True`` shows pytest's own coloured output instead of the widget, as
-    ``pytest -v test_<project>.py`` prints it. It cannot be combined with ``nice``.
+    ``pytest -v test_<project>.py`` prints it. It cannot be combined with ``nice=True``.
     """
     test_path = tests or resolve_test(project)
     _show(run(test_path, project=project, failfast=failfast, solution=solution,
               nice=nice, raw=raw), raw=raw)
 
 
-_USAGE = "Usage: %%test [<project> | <test file> | <folder>] [--nice | --raw]"
+_USAGE = "Usage: %%test [<project> | <test file> | <folder>] [--no-nice | --raw]"
 
 
 def _cell_number(ip):
@@ -336,13 +340,14 @@ def register_test_magic(ipython=None):
 
     In a test file, the ``module`` fixture is the cell, whatever the file is called.
 
-    ``--nice`` explains a failed ``assert module.f(...) == value`` (in a cell with
-    its own tests, ``assert f(...) == value``) as "f(...) should return <value>
-    but returns <what it returned>" instead of pytest's description of how the
-    two values differ.
+    A failed ``assert module.f(...) == value`` (in a cell with its own tests,
+    ``assert f(...) == value``) is explained as "f(...) should return <value> but
+    returns <what it returned>" instead of pytest's description of how the two
+    values differ. ``--no-nice`` keeps pytest's. (``--nice``, which asked for it
+    before it was the default, is still accepted.)
 
     ``--raw`` shows pytest's own coloured output instead of the widget, as
-    ``pytest -v`` prints it in a terminal. ``--nice`` and ``--raw`` exclude each other.
+    ``pytest -v`` prints it in a terminal.
     """
     try:
         from IPython.core.magic import register_cell_magic  # noqa: F401
@@ -358,22 +363,26 @@ def register_test_magic(ipython=None):
         options = [w for w in words if w.startswith("-")]
         # An option this magic does not know is refused rather than ignored, so a
         # typo like --nicer does not quietly run the checks without it.
-        if len(targets) > 1 or any(o not in ("--nice", "--raw") for o in options):
+        if len(targets) > 1 or any(o not in ("--nice", "--no-nice", "--raw") for o in options):
             print(_USAGE)
             return
-        nice, raw = "--nice" in options, "--raw" in options
-        if nice and raw:
+        raw = "--raw" in options
+        if "--nice" in options and "--no-nice" in options:
+            print("--nice and --no-nice cannot be used together.")
+            return
+        if "--nice" in options and raw:
             print("--nice and --raw cannot be used together: --raw shows pytest's own "
                   "output, which --nice does not change.")
             return
+        nice = False if "--no-nice" in options else None     # None: nice unless --raw
         if targets:
             try:
-                test_path, project = resolve_target(targets[0])
+                test_path, project, tests_from = resolve_target(targets[0])
             except FileNotFoundError as exc:
                 print(exc)
                 return
         else:
-            test_path, project = None, "cell"             # the cell holds its own tests
+            test_path, project, tests_from = None, "cell", "this cell"   # tests in the cell
         source, filename = _cell_source(ip, cell, project)
         module = types.ModuleType(project)
         module.__file__ = filename
@@ -390,11 +399,12 @@ def register_test_magic(ipython=None):
                          import_error=f"{type(exc).__name__}: {exc}",
                          traceback=format_traceback(type(exc), exc, exc.__traceback__, filename),
                          exc_info=(type(exc), exc, student_traceback(exc.__traceback__, filename)),
-                         stdout=buf.getvalue().rstrip("\n"))
+                         stdout=buf.getvalue().rstrip("\n"), tests_from=tests_from)
             _show(rep, raw=raw)
             return
         rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue(),
                            nice=nice, raw=raw)
+        rep.tests_from = tests_from
         # isidentifier(): a cell with its own tests also holds the helpers pytest's
         # assert rewriting adds, under names like "@py_builtins"
         ip.user_ns.update({k: v for k, v in module.__dict__.items()

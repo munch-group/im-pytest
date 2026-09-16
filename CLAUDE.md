@@ -31,7 +31,9 @@ a ~400-line per-file `unittest` harness from the old course.
   collect a `Report`, suppress pytest's own terminal output for mode 1.
 - `widget.py` — `TestResultWidget` (an `anywidget` styled like script-widget's
   `%%exercise` output), plus `check()` and the `%%test` cell magic. Auto-registers
-  the magic on import. The widget shows a **Checks** card (✓/✗ per function) and,
+  the magic on import. The widget shows a **TESTS - <where>** card (✓/✗ per
+  function; `<where>` is `Report.tests_from`: the project, a test file's or
+  folder's name, "current folder" or "this cell") and,
   only when the student's code printed, a **Terminal output** card with their
   prints — mirroring the `%%exercise` widget. An error the code raised is *not*
   in a card: `_show` hands it to `ip.showtraceback`, so it is an ordinary error
@@ -75,10 +77,13 @@ a ~400-line per-file `unittest` harness from the old course.
   `sys.modules` holds: in a kernel, the test file as it was on the first run.
   `runner._forget_test_module` drops it first. `--nice` depends on this — it reads
   the assert's source from the file, which must be the code that ran.
-- **`--nice`** (`%%test … --nice`, `check(nice=True)`, `pytest-check --nice`)
-  rewrites a failed `assert module.f(...) == value` / `is value` as "f(...) should
+- **Nice messages are the default** (`--no-nice`, `check(nice=False)`,
+  `pytest-check --no-nice` turn them off; `--nice` is still accepted). They
+  rewrite a failed `assert module.f(...) == value` / `is value` as "f(...) should
   return X but returns Y": call text from the assert's AST in the test file, values
   from the `pytest_assertrepr_compare` hook. Any other assert keeps pytest's text.
+  `run()`/`check()` take `nice=None` for the default, which is off under `raw`
+  (`runner._nice_unless_raw`); an explicit `nice=True` with `raw` is refused.
 - **`--raw`** (`%%test … --raw`, `check(raw=True)`) prints `Report.output` — the
   code's prints, then pytest's output run with `-v --color=yes` —
   instead of the widget; `_assert_message` strips the colour so `Report` messages

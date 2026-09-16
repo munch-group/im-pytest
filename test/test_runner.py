@@ -104,7 +104,8 @@ def test_long(module):
 
 _MESSAGES_SNIPPET = (
     "import json;from im_pytest import run;"
-    "r=run('test_msgs.py',project='msgs',failfast=False);"
+    # nice=False: these are about pytest's own explanations, which --nice replaces
+    "r=run('test_msgs.py',project='msgs',failfast=False,nice=False);"
     "print(json.dumps({o.name:o.message for o in r.outcomes}))"
 )
 

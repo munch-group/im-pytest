@@ -47,6 +47,9 @@ class Report:
     # what a terminal would have shown: the code's own prints while it loaded,
     # then pytest's output (for raw=True coloured, as `pytest -v` prints it)
     output: str = field(default="", repr=False)
+    # where the tests were read, as the widget's header names it: a project, a
+    # file's or folder's name, "current folder" or "this cell"; empty for the project
+    tests_from: str = ""
 
     @property
     def passed(self) -> int:

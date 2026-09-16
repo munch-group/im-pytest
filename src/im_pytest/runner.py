@@ -469,28 +469,34 @@ def _build_report(project, cap, pre_stdout="") -> Report:
     return rep
 
 
-def _refuse_nice_and_raw(nice, raw):
+def _nice_unless_raw(nice, raw) -> bool:
+    """``nice`` as asked, or by default: nice, except in raw output, which is
+    pytest's own and which nice does not change -- so asking for both is refused."""
     if nice and raw:
         raise ValueError("nice and raw cannot be combined: raw shows pytest's own "
                          "output, which nice does not change")
+    return (not raw) if nice is None else bool(nice)
 
 
 def run(test_path: str, *, project: str = "", failfast: bool = True,
-        solution: bool | str = False, nice: bool = False, raw: bool = False) -> Report:
+        solution: bool | str = False, nice: bool | None = None,
+        raw: bool = False) -> Report:
     """Run ``test_path`` against the student's ``<project>.py`` in the cwd.
 
     With ``solution=True`` the reference ``<project>_solution.py`` is run
     instead (or ``solution="<suffix>"`` for another suffix). The student's
     ``<project>.py`` is not read and not written.
 
-    With ``nice=True`` a failed ``assert module.f(...) == value`` is explained as
-    "f(...) should return <value> but returns <what it returned>" instead of
-    pytest's diff.
+    A failed ``assert module.f(...) == value`` is explained as "f(...) should
+    return <value> but returns <what it returned>" instead of pytest's diff.
+    That is the default (``nice=None``); ``nice=False`` keeps pytest's
+    explanation.
 
     With ``raw=True`` the report's ``output`` is pytest's own, coloured output,
-    as ``pytest -v test_<project>.py`` prints it.
+    as ``pytest -v test_<project>.py`` prints it; the explanations are then
+    pytest's too, unless ``nice=True`` is also given, which is refused.
     """
-    _refuse_nice_and_raw(nice, raw)
+    nice = _nice_unless_raw(nice, raw)
     project = project or _plugin.student_module_name(os.path.basename(test_path).rsplit(".", 1)[0])
     suffix = _plugin.SOLUTION_SUFFIX if solution is True else (solution or "")
 
@@ -531,7 +537,7 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
 
 
 def run_injected(project: str, module: types.ModuleType, test_path: str | None = None, *,
-                 pre_stdout: str = "", failfast: bool = True, nice: bool = False,
+                 pre_stdout: str = "", failfast: bool = True, nice: bool | None = None,
                  raw: bool = False) -> Report:
     """Run against an in-notebook module built by the ``%%test`` cell magic.
 
@@ -541,14 +547,16 @@ def run_injected(project: str, module: types.ModuleType, test_path: str | None =
     argument), and should have been compiled with :func:`compile_test_cell`.
     ``project`` only labels the result.
 
-    With ``nice=True`` (``%%test <project> --nice``) a failed
-    ``assert module.f(...) == value`` is explained as "f(...) should return
-    <value> but returns <what it returned>" instead of pytest's diff.
+    A failed ``assert module.f(...) == value`` is explained as "f(...) should
+    return <value> but returns <what it returned>" instead of pytest's diff.
+    That is the default (``nice=None``); ``nice=False`` keeps pytest's
+    explanation.
+    (``%%test <project> --no-nice``).
 
     With ``raw=True`` (``%%test <project> --raw``) the report's ``output`` is
     pytest's own, coloured ``pytest -v`` output, after ``pre_stdout``.
     """
-    _refuse_nice_and_raw(nice, raw)
+    nice = _nice_unless_raw(nice, raw)
     _plugin._INJECTED_FOR_ALL = module
     try:
         cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, nice=nice,

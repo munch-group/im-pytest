@@ -17,18 +17,17 @@ im_pytest.check("translationproject")   # friendly panel: ✓/✗ per function
    `translationproject.py` and renders a beginner-friendly panel: a green ✓ or
    red ✗ per function, the failing assertion, and a "functions not defined yet"
    note. No test source, no traceback. For the early weeks, before students know
-   what a test is. `--nice` goes one step further and words a failed
-   `assert module.f(...) == value` as `f(...) should return <value> but returns
-   <what it returned>`, in place of pytest's diff: `%%test translationproject
-   --nice`, `check("translationproject", nice=True)` or
-   `pytest-check --nice translationproject`.
+   what a test is. A failed `assert module.f(...) == value` is worded as
+   `f(...) should return <value> but returns <what it returned>`, in place of
+   pytest's diff; `%%test translationproject --no-nice`,
+   `check("translationproject", nice=False)` or
+   `pytest-check --no-nice translationproject` shows pytest's explanation instead.
 2. **Raw pytest** — `pytest test_translationproject.py`. The *same* file, now run
    with the real tool so students learn to read pytest's output. The `module`
    fixture, the `requires` marker and the not-defined banner are provided
    automatically (this package registers a `pytest11` plugin). In a notebook,
    `%%test translationproject --raw` or `check("translationproject", raw=True)`
-   shows the same coloured output `pytest -v` prints, in place of the panel
-   (not together with `--nice`).
+   shows the same coloured output `pytest -v` prints, in place of the panel.
 3. **Student-authored** — students write their own `assert`-based tests to
    specify and validate AI-produced code, using the provided files as the model.
    A `%%test` cell with no argument runs the `test_...` functions written in the
