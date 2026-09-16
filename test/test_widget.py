@@ -76,6 +76,24 @@ def test_ok_is_not_left_at_its_default_when_the_run_failed(captured):
     assert captured["ok"] is False
 
 
+def test_an_error_with_exc_info_is_not_drawn_in_the_widget():
+    """IPython shows it under the widget as an ordinary error output (see
+    ``_show``); the widget keeps the prints, and a traceback with nothing to
+    show natively -- a plain explanation -- stays in the card."""
+    try:
+        raise TypeError("boom")
+    except TypeError as exc:
+        exc_info = (TypeError, exc, exc.__traceback__)
+    shown = ResultWidget(Report(project="p", outcomes=[Outcome("g", FAIL, "raised")],
+                                stdout="hello", traceback="TypeError: boom",
+                                exc_info=exc_info))
+    assert shown.traceback == "" and shown.stdout == "hello"
+
+    explained = ResultWidget(Report(project="p", import_error="No file named x.py",
+                                    traceback="No file named x.py was found here"))
+    assert explained.traceback == "No file named x.py was found here"
+
+
 def test_layout_width_rides_in_the_layout_widgets_own_comm_open():
     """``layout`` is built from a dict in the constructor so the Layout
     sub-widget opens with the width already set, rather than an update chasing it."""

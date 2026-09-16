@@ -10,12 +10,15 @@ A run has two distinct kinds of result:
   raised while it was being tested (``ERROR``);
 * **terminal output** — anything the student's code printed, plus the traceback
   of a non-assertion error in their code (or an import/syntax error that stopped
-  the file running at all). This mirrors what the ``%%exercise`` widget shows.
+  the file running at all).
+
+In a notebook the error itself is shown by IPython, as an ordinary error output
+under the widget, from ``exc_info``; ``traceback`` is its text for the terminal.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 PASS = "pass"
 FAIL = "fail"     # an assertion about the return value failed
@@ -38,6 +41,9 @@ class Report:
     traceback: str = ""                                  # colored traceback of a code error
     import_error: Optional[str] = None                   # short "cannot run" summary
     collect_error: Optional[str] = None                  # pytest could not load the test file
+    # (type, value, traceback) of that error, the traceback starting at the
+    # student's own code where it passes through it
+    exc_info: Optional[Any] = field(default=None, repr=False, compare=False)
 
     @property
     def passed(self) -> int:

@@ -30,12 +30,18 @@ import importlib.util
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
 # %%test injects a module here so the fixture can return an in-notebook cell
 # instead of a file on disk. Keyed by module name.
 _INJECTED: dict[str, types.ModuleType] = {}
+
+# ...or here, while %%test runs, when the cell is the code under test for *every*
+# test file in the run: `%%test tests/` collects test files of any name, and a
+# `%%test` cell holds its own tests.
+_INJECTED_FOR_ALL: types.ModuleType | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +144,8 @@ def import_student(name: str, cwd: str | None = None, *, suffix: str = "") -> ty
     """
     if name in _INJECTED:
         return _INJECTED[name]
+    if _INJECTED_FOR_ALL is not None:
+        return _INJECTED_FOR_ALL
 
     cwd = os.path.abspath(cwd or os.getcwd())
     if sys.path and sys.path[0] != cwd:
@@ -275,10 +283,14 @@ def pytest_ignore_collect(collection_path, config):
     then fail, and the run dies in collection, nowhere near the student's code.
 
     Directories that hold neither the working folder nor anything asked for on
-    the command line cannot contain the tests, so skip them. Initial paths and
-    their parents never reach this hook, so an explicit `pytest ../other/tests`
-    is unaffected. Pure path arithmetic only: touching the filesystem here is
-    the very thing being avoided.
+    the command line cannot contain the tests, so skip them. Pure path
+    arithmetic only: touching the filesystem here is the very thing being
+    avoided.
+
+    Initial paths and their parents never reach this hook, but what is *inside*
+    an initial path does: without the check against the command-line arguments,
+    `pytest ../other/tests` (and `%%test ../other/tests`) skipped every file in
+    the folder it was asked to run and reported that no tests ran.
     """
     try:
         invocation = config.invocation_params.dir
@@ -290,6 +302,10 @@ def pytest_ignore_collect(collection_path, config):
         return None
     if invocation.is_relative_to(collection_path):      # a folder we sit inside
         return None
+    for arg in getattr(config, "args", None) or ():
+        asked = Path(os.path.normpath(invocation / str(arg).split("::")[0]))
+        if collection_path.is_relative_to(asked):       # inside a path asked for
+            return None
     return True
 
 

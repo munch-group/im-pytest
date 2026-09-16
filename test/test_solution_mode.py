@@ -177,6 +177,20 @@ def test_collection_stays_inside_the_project_folder(tmp_path):
     assert d["collect_error"] is None
 
 
+def test_raw_pytest_collects_a_folder_outside_the_working_folder(tmp_path):
+    # Staying inside the working folder must not mean ignoring what was asked
+    # for: `pytest ../tests` used to skip every file in ../tests ("no tests ran").
+    (tmp_path / "work").mkdir()
+    (tmp_path / "tests" / "sub").mkdir(parents=True)
+    (tmp_path / "tests" / "test_top.py").write_text("def test_top():\n    pass\n")
+    (tmp_path / "tests" / "sub" / "test_deep.py").write_text("def test_deep():\n    pass\n")
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "--no-header",
+                           "-p", "no:cacheprovider", "../tests"],
+                          cwd=tmp_path / "work", capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout
+    assert "2 passed" in proc.stdout
+
+
 def test_collection_error_is_not_reported_as_a_check(tmp_path):
     # When collection *does* fail, it is not a result about any function of the
     # student's: it used to arrive as a failed check named after a directory.

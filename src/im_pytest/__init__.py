@@ -13,11 +13,11 @@ from __future__ import annotations
 from .ordering import ordered
 from .plugin import requires
 from .report import Report, Outcome
-from .runner import run, run_injected
+from .runner import compile_test_cell, run, run_injected
 from .widget import check, register_test_magic, TestResultWidget
 
-__all__ = ["check", "run", "run_injected", "requires", "ordered", "Report", "Outcome",
-           "TestResultWidget", "register_test_magic"]
+__all__ = ["check", "run", "run_injected", "compile_test_cell", "requires", "ordered",
+           "Report", "Outcome", "TestResultWidget", "register_test_magic"]
 
 # Auto-register the cell magic in notebooks (mirrors steps-widget / script-widget).
 try:  # pragma: no cover

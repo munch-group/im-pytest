@@ -212,11 +212,11 @@ def test_magic_without_the_flag_is_unchanged(tmp_path):
     assert "should return" not in report["left_call"]
 
 
-@pytest.mark.parametrize("line", ["shapes --nicer", "shapes -v", "--nice", ""])
+@pytest.mark.parametrize("line", ["shapes --nicer", "shapes -v", "shapes other"])
 def test_magic_refuses_what_it_does_not_understand(tmp_path, line):
     d = _python(tmp_path, _MAGIC_SNIPPET, line, _CELL)
     assert d["reports"] == []
-    assert d["printed"].strip() == "Usage: %%test <projectname> [--nice]"
+    assert d["printed"].strip() == "Usage: %%test [<project> | <test file> | <folder>] [--nice]"
 
 
 # check() and pytest-check read the student's shapes.py from the working folder

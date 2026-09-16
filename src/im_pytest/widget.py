@@ -5,14 +5,18 @@ The widget has up to two cards:
 
 * **Checks** — one ✓/✗ row per tested function, with the failing assertion, a
   "not defined yet" note, and a summary line.
-* **Terminal output** — shown only when the student's code printed something or
-  raised a non-assertion error; it shows their prints and a colored traceback,
-  exactly like the ``%%exercise`` widget.
+* **Terminal output** — shown only when the student's code printed something;
+  it shows their prints, like the ``%%exercise`` widget.
+
+An error the student's code raised is not drawn in a card. IPython shows it below
+the widget as an ordinary error output -- the same traceback, looking the same,
+as the code would give run without ``%%test``.
 """
 from __future__ import annotations
 
 import io
 import linecache
+import sys
 import types
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -20,8 +24,9 @@ import anywidget
 import traitlets
 
 from .report import Report, PASS, FAIL, ERROR
-from .resources import resolve_test
-from .runner import run, run_injected, format_traceback
+from .resources import resolve_target, resolve_test
+from .runner import (compile_test_cell, format_traceback, run, run_injected,
+                     student_traceback)
 
 try:
     from IPython import get_ipython
@@ -211,7 +216,8 @@ class TestResultWidget(anywidget.AnyWidget):
             ok=ok,
             undefined=list(report.undefined),
             stdout=report.stdout,
-            traceback=report.traceback,
+            # an error with exc_info is shown by IPython, under the widget (_show)
+            traceback=report.traceback if report.exc_info is None else "",
         )
 
 
@@ -221,15 +227,31 @@ def _show(report: Report) -> None:
     Returning the report would make Jupyter echo its ``repr`` under the widget —
     a screenful of dataclass fields and escaped ANSI codes below the friendly
     output the widget just drew. Anyone who wants the object calls ``run()``.
+
+    An error in the student's code goes to IPython's own ``showtraceback``, so it
+    appears under the widget exactly as it would without ``%%test``: an ordinary
+    error output, not a card. When the error stopped the code running at all (a
+    syntax error, say) there are no checks, and nothing is shown but what Python
+    would show -- anything printed before the error, then the error. The cell
+    itself still completes, as it did when the error was drawn in the widget.
     """
     ip = get_ipython()
-    if ip is not None:
-        try:
+    if ip is None:
+        print(report.to_text())
+        return
+    could_not_run = report.import_error is not None and report.exc_info is not None
+    try:
+        if not could_not_run:
             _ipy_display(TestResultWidget(report))
-            return
-        except Exception:  # pragma: no cover
-            pass
-    print(report.to_text())
+    except Exception:  # pragma: no cover
+        print(report.to_text())
+        return
+    if could_not_run and report.stdout:
+        print(report.stdout)
+    if report.exc_info is not None:
+        # tb_offset=0: by default IPython drops the first frame, which in a cell
+        # is its own; here the traceback already starts at the student's code
+        ip.showtraceback(report.exc_info, tb_offset=0)
 
 
 def check(project: str, *, tests: str | None = None, failfast: bool = True,
@@ -250,12 +272,65 @@ def check(project: str, *, tests: str | None = None, failfast: bool = True,
     _show(run(test_path, project=project, failfast=failfast, solution=solution, nice=nice))
 
 
-def register_test_magic(ipython=None):
-    """Register the ``%%test <project> [--nice]`` cell magic (idempotent).
+_USAGE = "Usage: %%test [<project> | <test file> | <folder>] [--nice]"
 
-    ``--nice`` explains a failed ``assert module.f(...) == value`` as
-    "f(...) should return <value> but returns <what it returned>" instead of
-    pytest's description of how the two values differ.
+
+def _cell_number(ip):
+    """The ``n`` of ``In[n]`` for the cell this magic runs in, or None.
+
+    Read off the frame of the cell's own code, which IPython compiled under a
+    name it maps to that number -- not from ``ip.execution_count``, which
+    IPython 9 advances before a cell runs and IPython 8 after.
+    """
+    numbers = getattr(getattr(ip, "compile", None), "_filename_map", None)
+    if not numbers:
+        return None
+    frame = sys._getframe(1)
+    while frame is not None:
+        number = numbers.get(frame.f_code.co_filename)
+        if number is not None:
+            return number
+        frame = frame.f_back
+    return None
+
+
+def _cell_source(ip, cell, project):
+    """The source to compile a ``%%test`` cell from, and the filename to compile it under.
+
+    Where the cell has an ``In[n]``, its code is registered with IPython's own
+    compiler under that number, so its frames in a traceback read ``Cell In[n],
+    line 3`` as they would without ``%%test``. A blank first line stands in for
+    the ``%%test`` line, so those line numbers are the ones the cell shows.
+    Otherwise (the magic called from code, not typed in a cell) the name is
+    ``<project>``.
+    """
+    number = _cell_number(ip)
+    if number is not None:
+        source = "\n" + cell
+        return source, ip.compile.cache(source, number)
+    filename = f"<{project}>"
+    # register the cell source so tracebacks can show the offending line
+    linecache.cache[filename] = (len(cell), None, cell.splitlines(keepends=True), filename)
+    return cell, filename
+
+
+def register_test_magic(ipython=None):
+    """Register the ``%%test`` cell magic (idempotent).
+
+    The cell is the code under test, and the line says where the tests are:
+
+    * ``%%test orfproject`` — ``test_orfproject.py``, found as ``check()`` finds it;
+    * ``%%test tests/test_extra.py`` — that test file;
+    * ``%%test tests`` — every ``test_*.py`` in the folder ``tests`` and below;
+    * ``%%test`` — in the cell itself: its ``test_...`` functions test the
+      functions it defines.
+
+    In a test file, the ``module`` fixture is the cell, whatever the file is called.
+
+    ``--nice`` explains a failed ``assert module.f(...) == value`` (in a cell with
+    its own tests, ``assert f(...) == value``) as "f(...) should return <value>
+    but returns <what it returned>" instead of pytest's description of how the
+    two values differ.
     """
     try:
         from IPython.core.magic import register_cell_magic  # noqa: F401
@@ -267,35 +342,46 @@ def register_test_magic(ipython=None):
 
     def test(line, cell):
         words = line.split()
-        names = [w for w in words if not w.startswith("-")]
+        targets = [w for w in words if not w.startswith("-")]
         options = [w for w in words if w.startswith("-")]
         # An option this magic does not know is refused rather than ignored, so a
         # typo like --nicer does not quietly run the checks without it.
-        if not names or any(o != "--nice" for o in options):
-            print("Usage: %%test <projectname> [--nice]")
+        if len(targets) > 1 or any(o != "--nice" for o in options):
+            print(_USAGE)
             return
-        project = names[0]
         nice = "--nice" in options
-        test_path = resolve_test(project)
-        filename = f"<{project}>"
+        if targets:
+            try:
+                test_path, project = resolve_target(targets[0])
+            except FileNotFoundError as exc:
+                print(exc)
+                return
+        else:
+            test_path, project = None, "cell"             # the cell holds its own tests
+        source, filename = _cell_source(ip, cell, project)
         module = types.ModuleType(project)
         module.__file__ = filename
-        # register the cell source so tracebacks can show the offending line
-        linecache.cache[filename] = (len(cell), None, cell.splitlines(keepends=True), filename)
         buf = io.StringIO()
         try:
-            code = compile(cell, filename, "exec")
+            if test_path is None:
+                code = compile_test_cell(source, filename)
+            else:
+                code = compile(source, filename, "exec")
             with redirect_stdout(buf), redirect_stderr(buf):
                 exec(code, module.__dict__)
         except Exception as exc:  # noqa: BLE001
             rep = Report(project=project,
                          import_error=f"{type(exc).__name__}: {exc}",
                          traceback=format_traceback(type(exc), exc, exc.__traceback__, filename),
+                         exc_info=(type(exc), exc, student_traceback(exc.__traceback__, filename)),
                          stdout=buf.getvalue().rstrip("\n"))
             _show(rep)
             return
         rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue(), nice=nice)
-        ip.user_ns.update({k: v for k, v in module.__dict__.items() if not k.startswith("__")})
+        # isidentifier(): a cell with its own tests also holds the helpers pytest's
+        # assert rewriting adds, under names like "@py_builtins"
+        ip.user_ns.update({k: v for k, v in module.__dict__.items()
+                           if not k.startswith("__") and k.isidentifier()})
         _show(rep)
 
     ip.register_magic_function(test, magic_kind="cell", magic_name="test")

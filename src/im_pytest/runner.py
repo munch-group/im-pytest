@@ -17,10 +17,12 @@ import linecache
 import os
 import re
 import sys
+import tempfile
 import types
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import nullcontext, redirect_stdout, redirect_stderr
 
 import pytest
+from _pytest.assertion.rewrite import rewrite_asserts
 
 from . import plugin as _plugin
 from .report import Report, Outcome, PASS, FAIL, ERROR
@@ -70,9 +72,11 @@ def _assert_message(report) -> str:
 # The function name and its arguments are read from the failing assert in the
 # test file, as written there; the two values are the objects pytest compared,
 # handed over by its pytest_assertrepr_compare hook. Only an assert of the form
-# `module.f(...) == value` (either way round, or `is`) says this. Anything else --
-# isinstance(...), len(...), module.codon_map == ..., an assert inside a helper,
-# an assert with its own message -- keeps pytest's explanation.
+# `module.f(...) == value` (either way round, or `is`) says this -- or, in a
+# `%%test` cell that holds its own tests, `f(...) == value` for a function the
+# cell defines. Anything else -- isinstance(...), len(...), module.codon_map ==
+# ..., an assert inside a helper, an assert with its own message -- keeps
+# pytest's explanation.
 
 _NICE_OPS = {ast.Eq: "==", ast.Is: "is"}
 # Long enough for every literal expected value in the course's test files (the
@@ -95,38 +99,52 @@ def _nice_repr(obj) -> str:
 
 
 def _failing_assert(tb, test_file):
-    """The ``assert`` statement the failure was raised at, and its file's source."""
+    """The ``assert`` the failure was raised at, with its file's source and syntax tree.
+
+    ``test_file`` is the test module's ``__file__``: a path, or the ``<cell>``
+    name a ``%%test`` cell was compiled under, whose source is in linecache.
+    """
     while tb.tb_next is not None:
         tb = tb.tb_next
     filename = tb.tb_frame.f_code.co_filename
     if os.path.abspath(filename) != os.path.abspath(str(test_file)):
-        return None, ""
+        return None, "", None
     # The file as it is now, not as linecache last saw it: _forget_test_module
     # has pytest import the test file afresh on every run, so this is the text
-    # the failing code was compiled from.
+    # the failing code was compiled from. (A cell's entry has no mtime, and
+    # checkcache leaves it alone.)
     linecache.checkcache(filename)
     source = "".join(linecache.getlines(filename))
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return None, ""
+        return None, "", None
     for node in ast.walk(tree):
         if isinstance(node, ast.Assert) and node.lineno <= tb.tb_lineno <= node.end_lineno:
-            return node, source
-    return None, ""
+            return node, source, tree
+    return None, "", None
 
 
 def _call_text(call, source) -> str:
     """``find_orfs("ATGTAA")`` for ``module.find_orfs("ATGTAA")``, as the test wrote it."""
+    name = call.func.attr if isinstance(call.func, ast.Attribute) else call.func.id
     text = ast.get_source_segment(source, call)
     func = ast.get_source_segment(source, call.func)
     if text and func and "\n" not in text:
-        return call.func.attr + text[len(func):]
+        return name + text[len(func):]
     # a call spread over several lines: one line, at the cost of the test's own quoting
-    return call.func.attr + ast.unparse(call)[len(ast.unparse(call.func)):]
+    return name + ast.unparse(call)[len(ast.unparse(call.func)):]
 
 
-def _nice_sentence(assert_node, source, compared) -> str | None:
+def _is_student_call(side, own_functions) -> bool:
+    if not isinstance(side, ast.Call):
+        return False
+    if isinstance(side.func, ast.Attribute):            # module.f(...), the plugin's fixture
+        return isinstance(side.func.value, ast.Name) and side.func.value.id == "module"
+    return isinstance(side.func, ast.Name) and side.func.id in own_functions
+
+
+def _nice_sentence(assert_node, source, tree, compared, cell=False) -> str | None:
     test = assert_node.test
     if (assert_node.msg is not None or not isinstance(test, ast.Compare)
             or len(test.ops) != 1 or compared is None):
@@ -134,14 +152,46 @@ def _nice_sentence(assert_node, source, compared) -> str | None:
     op, left, right = compared
     if _NICE_OPS.get(type(test.ops[0])) != op:
         return None
+    # In a cell that holds its own tests, the functions it defines are the code
+    # under test. In a test file they are helpers, so only module.f(...) counts.
+    own_functions = {
+        node.name for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not node.name.startswith("test")
+    } if cell else set()
     for side, actual, expected in ((test.left, left, right),
                                    (test.comparators[0], right, left)):
-        if (isinstance(side, ast.Call) and isinstance(side.func, ast.Attribute)
-                and isinstance(side.func.value, ast.Name)
-                and side.func.value.id == "module"):          # the plugin's fixture
+        if _is_student_call(side, own_functions):
             return (f"{_call_text(side, source)} should return {_nice_repr(expected)}"
                     f" but returns {_nice_repr(actual)}")
     return None
+
+
+def compile_test_cell(source: str, filename: str):
+    """Compile a ``%%test`` cell that holds its own tests.
+
+    Its asserts are rewritten the way pytest rewrites a test file's, so a failing
+    check says what was compared (``assert 2 == 3``, ``where 2 = f(1)``) instead
+    of a bare ``AssertionError``. pytest cannot do it for us: it rewrites files as
+    it imports them, and the cell is run once, by the magic, never imported.
+    """
+    tree = ast.parse(source, filename)
+    rewrite_asserts(tree, source.encode(), filename)
+    return compile(tree, filename, "exec", dont_inherit=True)
+
+
+class _CellModule(pytest.Module):
+    """A test module whose object is a ``%%test`` cell that has already run.
+
+    pytest is pointed at an empty placeholder file, and this collector hands it
+    the cell instead of importing the placeholder -- so the cell's code runs
+    once, where the magic captured its prints and any error it raised.
+    """
+
+    cell = None
+
+    def _getobj(self):
+        return self.cell
 
 
 def _tb_formatter():
@@ -169,25 +219,29 @@ def _tb_formatter():
         return tb
 
 
-def format_traceback(exc_type, exc_value, exc_tb, student_file=None) -> str:
-    """A colored, student-focused traceback — same look as the ``%%exercise`` widget.
-
-    If ``student_file`` is given, the traceback is sliced to start at the first
-    frame inside the student's own file, so pytest/plumbing frames are hidden.
-    """
-    use_tb = exc_tb
+def student_traceback(exc_tb, student_file=None):
+    """``exc_tb`` from the first frame inside ``student_file`` on, so that
+    pytest's and the runner's own frames are left out; all of it if the error
+    never passed through the student's file (a syntax error, say)."""
     if student_file and exc_tb is not None:
         target = os.path.abspath(student_file)
         cur = exc_tb
         while cur is not None:
             fn = cur.tb_frame.f_code.co_filename
             if os.path.abspath(fn) == target or fn == student_file:
-                use_tb = cur
-                break
+                return cur
             cur = cur.tb_next
+    return exc_tb
+
+
+def format_traceback(exc_type, exc_value, exc_tb, student_file=None) -> str:
+    """A colored, student-focused traceback, as text (see :func:`student_traceback`)."""
+    use_tb = student_traceback(exc_tb, student_file)
     try:
         tbf = _tb_formatter()
-        return tbf.stb2text(tbf.structured_traceback(exc_type, exc_value, use_tb))
+        # tb_offset=0: the kernel's InteractiveTB skips one frame by default --
+        # the frame IPython runs a cell in -- which here is the student's own
+        return tbf.stb2text(tbf.structured_traceback(exc_type, exc_value, use_tb, tb_offset=0))
     except Exception:
         import traceback
         return "".join(traceback.format_exception(exc_type, exc_value, use_tb))
@@ -196,13 +250,16 @@ def format_traceback(exc_type, exc_value, exc_tb, student_file=None) -> str:
 class _Capture:
     """Records outcomes, student prints and a code-error traceback for one run."""
 
-    def __init__(self, student_file=None, nice=False):
+    def __init__(self, student_file=None, nice=False, cell=None):
         self.outcomes: list[Outcome] = []
         self.config = None
         self.student_file = student_file
         self.nice = nice
+        self.cell = cell          # a %%test cell holding its own tests, or None
+        self.cell_path = ""       # the placeholder file pytest is pointed at for it
         self.stdout_parts: list[str] = []
         self.traceback = ""
+        self.exc_info = None      # the error `traceback` is the text of
         self.collect_error = ""
         self.exit_code = 0
         self.pytest_output = ""
@@ -211,6 +268,15 @@ class _Capture:
 
     def pytest_configure(self, config):
         self.config = config
+
+    def pytest_pycollect_makemodule(self, module_path, parent):
+        # Called for each test file before pytest imports it.
+        if self.cell is not None and os.path.realpath(module_path) == self.cell_path:
+            collector = _CellModule.from_parent(parent, path=module_path)
+            collector.cell = self.cell
+            return collector
+        _forget_test_module(module_path)
+        return None               # pytest's own collector
 
     def pytest_runtest_logstart(self, nodeid):
         self._compared = None
@@ -239,23 +305,28 @@ class _Capture:
             # failed check called "kmt". Keep it separate and say what it is.
             if not self.collect_error:
                 self.collect_error = f"{exc.type.__name__}: {exc.value}"
-                self.traceback = self.traceback or format_traceback(
-                    exc.type, exc.value, exc.tb)
+                if not self.traceback:
+                    self.traceback = format_traceback(exc.type, exc.value, exc.tb)
+                    self.exc_info = (exc.type, exc.value, exc.tb)
             return
         name = _clean_name(report.nodeid)
         if issubclass(exc.type, AssertionError):
             message = _assert_message(report)
             if self.nice:
-                assert_node, source = _failing_assert(exc.tb, node.path)
-                sentence = assert_node and _nice_sentence(assert_node, source, self._compared)
+                test_file = getattr(getattr(node, "module", None), "__file__", None) or node.path
+                assert_node, source, tree = _failing_assert(exc.tb, test_file)
+                sentence = assert_node and _nice_sentence(
+                    assert_node, source, tree, self._compared, cell=self.cell is not None)
                 if sentence:
                     message = message.split("\n", 1)[0] + "\n  " + sentence
             self._record(name, FAIL, message)
         else:
-            # the student's code raised -> show it in the terminal-output area
+            # the student's code raised -> show the error, as Python would
             self._record(name, ERROR, f"raised {exc.type.__name__}: {exc.value}")
             if not self.traceback:
                 self.traceback = format_traceback(exc.type, exc.value, exc.tb, self.student_file)
+                self.exc_info = (exc.type, exc.value,
+                                 student_traceback(exc.tb, self.student_file))
 
     def pytest_collectreport(self, report):
         if report.failed and not self.collect_error:
@@ -295,30 +366,42 @@ def _forget_test_module(test_path) -> None:
             del sys.modules[name]
 
 
-def _run_pytest(test_path, student_file, failfast, suffix="", nice=False) -> _Capture:
-    cap = _Capture(student_file=student_file, nice=nice)
-    _forget_test_module(test_path)
-    # rootdir and confcutdir are pinned to the folder holding the test file.
-    # Left to itself pytest walks *up* from the test file, building a collector
-    # for every parent inside confcutdir and listing each one; `-c os.devnull`
-    # puts the rootdir at /dev, which is above nothing, so the walk runs to "/"
-    # and the listing takes in the whole home directory on the way. Pinned, a
-    # run of one project's tests looks at exactly one folder: the project's own.
-    here = os.path.dirname(os.path.abspath(str(test_path))) or os.getcwd()
-    # --color=no, because ipykernel sets FORCE_COLOR=1 in the kernel's own
-    # environment: pytest then takes a StringIO for a colour terminal and runs
-    # every value in an assertion diff through pygments, and the escape codes
-    # land in the check message, which is plain text in the widget and the CLI.
-    args = [str(test_path), "-c", os.devnull, "--rootdir", here, "--confcutdir", here,
-            "-p", "no:cacheprovider", "-q", "--no-header", "--color=no"]
-    if failfast:
-        args.append("-x")
-    if suffix:
-        args += ["--solution", "--solution-suffix", suffix]
-    sink = io.StringIO()
-    with redirect_stdout(sink), redirect_stderr(sink):
-        cap.exit_code = pytest.main(args, plugins=[cap])
-    cap.pytest_output = sink.getvalue()
+def _run_pytest(test_path, student_file, failfast, suffix="", nice=False,
+                cell=None) -> _Capture:
+    """Run pytest on ``test_path`` -- a test file or a folder of them -- or, with
+    ``cell``, on the tests a ``%%test`` cell holds itself."""
+    cap = _Capture(student_file=student_file, nice=nice, cell=cell)
+    with tempfile.TemporaryDirectory() if cell is not None else nullcontext() as tmp:
+        if cell is not None:
+            test_path = os.path.join(tmp, "test_cell.py")
+            open(test_path, "w").close()
+            cap.cell_path = os.path.realpath(test_path)
+        test_path = os.path.abspath(str(test_path))
+        # rootdir and confcutdir are pinned to the folder holding the test file
+        # (or to the folder asked for). Left to itself pytest walks *up* from the
+        # test file, building a collector for every parent inside confcutdir and
+        # listing each one; `-c os.devnull` puts the rootdir at /dev, which is
+        # above nothing, so the walk runs to "/" and the listing takes in the whole
+        # home directory on the way. Pinned, a run of one project's tests looks at
+        # exactly one folder: the project's own.
+        here = test_path if os.path.isdir(test_path) else os.path.dirname(test_path)
+        # --color=no, because ipykernel sets FORCE_COLOR=1 in the kernel's own
+        # environment: pytest then takes a StringIO for a colour terminal and runs
+        # every value in an assertion diff through pygments, and the escape codes
+        # land in the check message, which is plain text in the widget and the CLI.
+        # python_files: in a folder, test files are the ones named test_*.py --
+        # not also pytest's default *_test.py.
+        args = [test_path, "-c", os.devnull, "--rootdir", here, "--confcutdir", here,
+                "-p", "no:cacheprovider", "-q", "--no-header", "--color=no",
+                "-o", "python_files=test_*.py"]
+        if failfast:
+            args.append("-x")
+        if suffix:
+            args += ["--solution", "--solution-suffix", suffix]
+        sink = io.StringIO()
+        with redirect_stdout(sink), redirect_stderr(sink):
+            cap.exit_code = pytest.main(args, plugins=[cap])
+        cap.pytest_output = sink.getvalue()
     return cap
 
 
@@ -335,14 +418,22 @@ def _build_report(project, cap, pre_stdout="") -> Report:
         # file with no tests, a usage error. None of those hooks fire through
         # the plugin, so without this the report is empty *and* content: no
         # failures, no undefined names, therefore "all checks passed".
-        rep.collect_error = (_first_lines(cap.pytest_output)
-                             or f"pytest stopped with exit code {int(cap.exit_code)} "
-                                "before running any checks")
+        if cap.exit_code == pytest.ExitCode.NO_TESTS_COLLECTED:
+            # pytest's own words are "no tests ran in 0.01s"; a cell or a folder
+            # with tests that are not named test_... says why.
+            rep.collect_error = ("No tests were found. pytest runs the functions whose "
+                                 "names start with test_, in files whose names start "
+                                 "with test_.")
+        else:
+            rep.collect_error = (_first_lines(cap.pytest_output)
+                                 or f"pytest stopped with exit code {int(cap.exit_code)} "
+                                    "before running any checks")
     if cap.config is not None:
         rep.undefined = sorted(getattr(cap.config, "_im_undefined", set()) or [])
     stdout = (pre_stdout or "") + "".join(cap.stdout_parts)
     rep.stdout = stdout.rstrip("\n")
     rep.traceback = cap.traceback
+    rep.exc_info = cap.exc_info
     return rep
 
 
@@ -381,6 +472,7 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
             project=project,
             import_error=f"{type(exc).__name__}: {exc}",
             traceback=format_traceback(type(exc), exc, exc.__traceback__, student_file),
+            exc_info=(type(exc), exc, student_traceback(exc.__traceback__, student_file)),
             stdout=pre.getvalue().rstrip("\n"),
         )
 
@@ -396,17 +488,24 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
     return _build_report(project, cap, pre_stdout=pre.getvalue())
 
 
-def run_injected(project: str, module: types.ModuleType, test_path: str, *,
+def run_injected(project: str, module: types.ModuleType, test_path: str | None = None, *,
                  pre_stdout: str = "", failfast: bool = True, nice: bool = False) -> Report:
     """Run against an in-notebook module built by the ``%%test`` cell magic.
+
+    ``test_path`` is a test file, or a folder whose ``test_*.py`` files are all
+    run; in every one of them the ``module`` fixture is ``module``. With
+    ``test_path=None`` the module holds its own tests (``%%test`` with no
+    argument), and should have been compiled with :func:`compile_test_cell`.
+    ``project`` only labels the result.
 
     With ``nice=True`` (``%%test <project> --nice``) a failed
     ``assert module.f(...) == value`` is explained as "f(...) should return
     <value> but returns <what it returned>" instead of pytest's diff.
     """
-    _plugin._INJECTED[project] = module
+    _plugin._INJECTED_FOR_ALL = module
     try:
-        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, nice=nice)
+        cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, nice=nice,
+                          cell=module if test_path is None else None)
     finally:
-        _plugin._INJECTED.pop(project, None)
+        _plugin._INJECTED_FOR_ALL = None
     return _build_report(project, cap, pre_stdout=pre_stdout)

@@ -24,18 +24,24 @@ a ~400-line per-file `unittest` harness from the old course.
   in mode 2 works with no boilerplate in the test file): the `module` fixture
   (imports the student's `<project>.py` **by explicit file path**, fresh each run,
   stdout suppressed), the `requires` marker + skip logic, and the terminal
-  "not defined" banner. `_INJECTED` lets `%%test` supply a cell-as-module.
+  "not defined" banner. `_INJECTED` lets `check()` reuse its import;
+  `_INJECTED_FOR_ALL` makes a `%%test` cell the `module` fixture of every test
+  file in the run.
 - `runner.py` — `run()` / `run_injected()`: invoke `pytest.main` in-process,
   collect a `Report`, suppress pytest's own terminal output for mode 1.
 - `widget.py` — `TestResultWidget` (an `anywidget` styled like script-widget's
   `%%exercise` output), plus `check()` and the `%%test` cell magic. Auto-registers
   the magic on import. The widget shows a **Checks** card (✓/✗ per function) and,
-  only when the student's code printed or raised a non-assertion error, a separate
-  **Terminal output** card with their prints and a colored, student-focused
-  traceback — mirroring the `%%exercise` widget.
+  only when the student's code printed, a **Terminal output** card with their
+  prints — mirroring the `%%exercise` widget. An error the code raised is *not*
+  in a card: `_show` hands it to `ip.showtraceback`, so it is an ordinary error
+  output under the widget (and, when the code could not run at all, the only
+  output after its prints).
 - `cli.py` — the `pytest-check` console entry point, including `--solution`,
   `--nice` and the `--sweep <dir>` pre-term check over every project.
-- `resources.py` — locate `test_<project>.py` (working folder or `IM_PROJECT_TESTS`).
+- `resources.py` — locate `test_<project>.py` (working folder or `IM_PROJECT_TESTS`),
+  and `resolve_target()` for `%%test <project | test file | folder>` (a plain word
+  is a project first, a folder only when no project test file exists).
 
 ## Conventions & gotchas
 
@@ -46,9 +52,19 @@ a ~400-line per-file `unittest` harness from the old course.
   rather than re-executing the file (no double prints/side effects).
 - **Assertion failures vs code errors** are separated in `_Capture`
   (`pytest_exception_interact`): an `AssertionError` about a return value is a
-  `FAIL` check; any other exception is an `ERROR` check whose colored,
-  student-sliced traceback (via `runner.format_traceback`, `IPython`'s
-  `FormattedTB`) and captured prints go to the widget's terminal-output card.
+  `FAIL` check; any other exception is an `ERROR` check. Its traceback, cut to
+  start at the student's code (`runner.student_traceback`), is kept twice on the
+  `Report`: as `exc_info` for IPython to show in a notebook, and as text
+  (`runner.format_traceback`) for the CLI. Captured prints go to the widget.
+- **An error looks as it would without `%%test`.** `_show` calls
+  `ip.showtraceback(exc_info, tb_offset=0)` — `tb_offset=0` because IPython
+  otherwise drops the first frame, which in its own cells is its runner but here
+  is the student's code. The magic compiles the cell under a name registered with
+  `ip.compile.cache` for the cell's `In[n]` (found from the calling frame, as
+  IPython 8 and 9 advance `execution_count` at different times), with a blank
+  first line for the `%%test` line, so frames read `Cell In[n], line k` with the
+  line numbers the cell shows. Called from code rather than a cell, the name is
+  `<project>`. The cell is not marked failed: `showtraceback` does not do that.
 - The plugin is inert for non-project tests: it only touches items carrying the
   `requires` marker and only prints the banner when something is undefined — so it
   is safe to have globally installed.
@@ -63,6 +79,18 @@ a ~400-line per-file `unittest` harness from the old course.
   rewrites a failed `assert module.f(...) == value` / `is value` as "f(...) should
   return X but returns Y": call text from the assert's AST in the test file, values
   from the `pytest_assertrepr_compare` hook. Any other assert keeps pytest's text.
+- **`%%test` with no argument runs tests held in the cell, and the cell runs once.**
+  The magic compiles it with `runner.compile_test_cell` (pytest's
+  `rewrite_asserts`, since pytest only rewrites files it imports) and execs it,
+  capturing prints and errors as for any `%%test`. pytest is then pointed at an
+  empty placeholder `test_cell.py` in a temp dir, and `_Capture`'s
+  `pytest_pycollect_makemodule` answers it with `_CellModule`, whose object is
+  the already-run cell -- so pytest never imports anything.
+- **`plugin.pytest_ignore_collect` lets through what is inside a command-line
+  path.** Its guard against walking the home directory skips folders neither
+  above nor below the working folder, and pytest shows it the *contents* of an
+  initial path (never the path itself), so `pytest ../tests` and
+  `%%test ../tests` used to collect nothing until it also checked `config.args`.
 - **Solution mode** (`--solution`, `IM_SOLUTION_SUFFIX`, `run(solution=True)`) is
   one suffix on the filename `plugin.import_student` opens: `<project>_solution.py`
   instead of `<project>.py`, under the same module name. It must never fall back

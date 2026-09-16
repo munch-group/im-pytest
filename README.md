@@ -28,6 +28,22 @@ im_pytest.check("translationproject")   # friendly panel: ✓/✗ per function
    automatically (this package registers a `pytest11` plugin).
 3. **Student-authored** — students write their own `assert`-based tests to
    specify and validate AI-produced code, using the provided files as the model.
+   A `%%test` cell with no argument runs the `test_...` functions written in the
+   cell itself against the functions defined beside them.
+
+What follows `%%test` says where the tests are; the cell is always the code
+under test, and in a test file the `module` fixture is the cell:
+
+```python
+%%test orfproject          # test_orfproject.py, found as check() finds it
+%%test tests/test_extra.py # that test file
+%%test tests               # every test_*.py in the folder tests/ and below
+%%test                     # the test_... functions in this cell
+```
+
+A plain word is a project name first and a folder only when no such project
+test file exists, so `%%test orfproject` keeps its meaning next to a folder
+called `orfproject`.
 
 There is also a terminal entry point:
 
