@@ -79,6 +79,16 @@ a ~400-line per-file `unittest` harness from the old course.
   rewrites a failed `assert module.f(...) == value` / `is value` as "f(...) should
   return X but returns Y": call text from the assert's AST in the test file, values
   from the `pytest_assertrepr_compare` hook. Any other assert keeps pytest's text.
+- **`--raw`** (`%%test … --raw`, `check(raw=True)`) prints `Report.output` — the
+  code's prints, then pytest's output run with `-v --color=yes` —
+  instead of the widget; `_assert_message` strips the colour so `Report` messages
+  stay plain. `--no-header` and the `-W` filter apply to every run: the header and
+  an "im_pytest cannot be rewritten" warning only describe the in-process run.
+  For a cell with its own tests, `_Capture.pytest_configure` points the terminal
+  reporter's `startpath` and `config.cwd_relative_nodeid` at the temp rootdir so
+  paths print as `test_cell.py`. **Never change `config.invocation_params.dir` for
+  that**: pytest `os.chdir`s back to it when the run ends, which left the kernel
+  in a deleted temp folder. The magic tests assert the cwd is unchanged.
 - **`%%test` with no argument runs tests held in the cell, and the cell runs once.**
   The magic compiles it with `runner.compile_test_cell` (pytest's
   `rewrite_asserts`, since pytest only rewrites files it imports) and execs it,

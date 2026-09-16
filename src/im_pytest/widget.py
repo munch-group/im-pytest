@@ -221,7 +221,7 @@ class TestResultWidget(anywidget.AnyWidget):
         )
 
 
-def _show(report: Report) -> None:
+def _show(report: Report, raw: bool = False) -> None:
     """Render a report, and return nothing.
 
     Returning the report would make Jupyter echo its ``repr`` under the widget —
@@ -234,12 +234,17 @@ def _show(report: Report) -> None:
     syntax error, say) there are no checks, and nothing is shown but what Python
     would show -- anything printed before the error, then the error. The cell
     itself still completes, as it did when the error was drawn in the widget.
+
+    With ``raw`` there is no widget: what is shown is what a terminal would show,
+    the code's prints and then pytest's own coloured output, errors in the tests
+    included. An error that stopped the code before pytest started is still shown
+    as above, since pytest never saw it.
     """
     ip = get_ipython()
-    if ip is None:
-        print(report.to_text())
-        return
     could_not_run = report.import_error is not None and report.exc_info is not None
+    if ip is None or (raw and not could_not_run):
+        print((report.output if raw and report.output else report.to_text()).rstrip("\n"))
+        return
     try:
         if not could_not_run:
             _ipy_display(TestResultWidget(report))
@@ -255,7 +260,7 @@ def _show(report: Report) -> None:
 
 
 def check(project: str, *, tests: str | None = None, failfast: bool = True,
-          solution: bool | str = False, nice: bool = False) -> None:
+          solution: bool | str = False, nice: bool = False, raw: bool = False) -> None:
     """Test the student's ``<project>.py`` in the working folder.
 
     >>> check("translationproject")
@@ -267,12 +272,16 @@ def check(project: str, *, tests: str | None = None, failfast: bool = True,
     ``nice=True`` explains a failed ``assert module.f(...) == value`` as
     "f(...) should return <value> but returns <what it returned>" instead of
     pytest's description of how the two values differ.
+
+    ``raw=True`` shows pytest's own coloured output instead of the widget, as
+    ``pytest -v test_<project>.py`` prints it. It cannot be combined with ``nice``.
     """
     test_path = tests or resolve_test(project)
-    _show(run(test_path, project=project, failfast=failfast, solution=solution, nice=nice))
+    _show(run(test_path, project=project, failfast=failfast, solution=solution,
+              nice=nice, raw=raw), raw=raw)
 
 
-_USAGE = "Usage: %%test [<project> | <test file> | <folder>] [--nice]"
+_USAGE = "Usage: %%test [<project> | <test file> | <folder>] [--nice | --raw]"
 
 
 def _cell_number(ip):
@@ -331,6 +340,9 @@ def register_test_magic(ipython=None):
     its own tests, ``assert f(...) == value``) as "f(...) should return <value>
     but returns <what it returned>" instead of pytest's description of how the
     two values differ.
+
+    ``--raw`` shows pytest's own coloured output instead of the widget, as
+    ``pytest -v`` prints it in a terminal. ``--nice`` and ``--raw`` exclude each other.
     """
     try:
         from IPython.core.magic import register_cell_magic  # noqa: F401
@@ -346,10 +358,14 @@ def register_test_magic(ipython=None):
         options = [w for w in words if w.startswith("-")]
         # An option this magic does not know is refused rather than ignored, so a
         # typo like --nicer does not quietly run the checks without it.
-        if len(targets) > 1 or any(o != "--nice" for o in options):
+        if len(targets) > 1 or any(o not in ("--nice", "--raw") for o in options):
             print(_USAGE)
             return
-        nice = "--nice" in options
+        nice, raw = "--nice" in options, "--raw" in options
+        if nice and raw:
+            print("--nice and --raw cannot be used together: --raw shows pytest's own "
+                  "output, which --nice does not change.")
+            return
         if targets:
             try:
                 test_path, project = resolve_target(targets[0])
@@ -375,13 +391,14 @@ def register_test_magic(ipython=None):
                          traceback=format_traceback(type(exc), exc, exc.__traceback__, filename),
                          exc_info=(type(exc), exc, student_traceback(exc.__traceback__, filename)),
                          stdout=buf.getvalue().rstrip("\n"))
-            _show(rep)
+            _show(rep, raw=raw)
             return
-        rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue(), nice=nice)
+        rep = run_injected(project, module, test_path, pre_stdout=buf.getvalue(),
+                           nice=nice, raw=raw)
         # isidentifier(): a cell with its own tests also holds the helpers pytest's
         # assert rewriting adds, under names like "@py_builtins"
         ip.user_ns.update({k: v for k, v in module.__dict__.items()
                            if not k.startswith("__") and k.isidentifier()})
-        _show(rep)
+        _show(rep, raw=raw)
 
     ip.register_magic_function(test, magic_kind="cell", magic_name="test")

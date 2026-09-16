@@ -25,7 +25,7 @@ import pytest
 from _pytest.assertion.rewrite import rewrite_asserts
 
 from . import plugin as _plugin
-from .report import Report, Outcome, PASS, FAIL, ERROR
+from .report import Report, Outcome, PASS, FAIL, ERROR, _strip_ansi
 
 try:
     from IPython import get_ipython
@@ -52,6 +52,7 @@ def _assert_message(report) -> str:
     lr = getattr(report, "longrepr", None)
     crash = getattr(lr, "reprcrash", None)
     msg = getattr(crash, "message", None) or (str(lr) if lr else "")
+    msg = _strip_ansi(msg)      # a raw run has pytest colour its output, messages too
     lines = [_FLAG_HINT_SUFFIX.sub("", ln) for ln in msg.splitlines()
              if ln.strip() and not _FLAG_HINT_LINE.match(ln)]
     if len(lines) > 6:
@@ -266,8 +267,24 @@ class _Capture:
         self._done: set[str] = set()
         self._compared = None     # (op, left, right) of this test's failing comparison
 
+    @pytest.hookimpl(trylast=True)
     def pytest_configure(self, config):
         self.config = config
+        if self.cell is not None:
+            # pytest names test files relative to the folder it was started in,
+            # and a cell's placeholder sits in a temp folder: raw output read
+            # "../../../../var/folders/.../test_cell.py", long enough to break
+            # its progress line. So, for this run's output only, name it from the
+            # temp folder, which --rootdir already is: "test_cell.py". Both are
+            # read only to print paths. (config.rootpath, not cell_path, which is
+            # the realpath: /private/var/... to /var/... is a long way round.)
+            # NOT config.invocation_params: pytest chdirs back to that folder
+            # when the run ends, which left the kernel in a deleted temp folder.
+            # trylast: the terminal reporter exists by then.
+            reporter = config.pluginmanager.get_plugin("terminalreporter")
+            if reporter is not None:
+                reporter.startpath = config.rootpath
+            config.cwd_relative_nodeid = lambda nodeid: nodeid    # nodeids are rootdir-relative
 
     def pytest_pycollect_makemodule(self, module_path, parent):
         # Called for each test file before pytest imports it.
@@ -367,9 +384,10 @@ def _forget_test_module(test_path) -> None:
 
 
 def _run_pytest(test_path, student_file, failfast, suffix="", nice=False,
-                cell=None) -> _Capture:
+                cell=None, raw=False) -> _Capture:
     """Run pytest on ``test_path`` -- a test file or a folder of them -- or, with
-    ``cell``, on the tests a ``%%test`` cell holds itself."""
+    ``cell``, on the tests a ``%%test`` cell holds itself. With ``raw``, pytest's
+    own output is kept as ``pytest -v`` prints it in a terminal, in colour."""
     cap = _Capture(student_file=student_file, nice=nice, cell=cell)
     with tempfile.TemporaryDirectory() if cell is not None else nullcontext() as tmp:
         if cell is not None:
@@ -385,15 +403,27 @@ def _run_pytest(test_path, student_file, failfast, suffix="", nice=False,
         # home directory on the way. Pinned, a run of one project's tests looks at
         # exactly one folder: the project's own.
         here = test_path if os.path.isdir(test_path) else os.path.dirname(test_path)
-        # --color=no, because ipykernel sets FORCE_COLOR=1 in the kernel's own
-        # environment: pytest then takes a StringIO for a colour terminal and runs
-        # every value in an assertion diff through pygments, and the escape codes
-        # land in the check message, which is plain text in the widget and the CLI.
         # python_files: in a folder, test files are the ones named test_*.py --
         # not also pytest's default *_test.py.
+        # --no-header: the platform/rootdir/configfile/plugins lines describe this
+        # in-process run, not the tests ("configfile: ../../dev/null").
+        # -W: every in-process run warns that im_pytest, imported before pytest
+        # started, "cannot be rewritten" -- true, harmless, and not about the
+        # tests, but in raw output it was a warnings section of its own.
         args = [test_path, "-c", os.devnull, "--rootdir", here, "--confcutdir", here,
-                "-p", "no:cacheprovider", "-q", "--no-header", "--color=no",
-                "-o", "python_files=test_*.py"]
+                "-p", "no:cacheprovider", "--no-header", "-o", "python_files=test_*.py",
+                "-W", "ignore:Module already imported so cannot be rewritten; im_pytest"
+                      ":pytest.PytestAssertRewriteWarning"]
+        if raw:
+            # as `pytest -v` prints it: a line per test, and full assertion diffs
+            args += ["-v", "--color=yes"]
+        else:
+            # --color=no, because ipykernel sets FORCE_COLOR=1 in the kernel's own
+            # environment: pytest then takes a StringIO for a colour terminal and
+            # runs every value in an assertion diff through pygments, and the
+            # escape codes land in the check message, which is plain text in the
+            # widget and the CLI.
+            args += ["-q", "--color=no"]
         if failfast:
             args.append("-x")
         if suffix:
@@ -425,7 +455,7 @@ def _build_report(project, cap, pre_stdout="") -> Report:
                                  "names start with test_, in files whose names start "
                                  "with test_.")
         else:
-            rep.collect_error = (_first_lines(cap.pytest_output)
+            rep.collect_error = (_first_lines(_strip_ansi(cap.pytest_output))
                                  or f"pytest stopped with exit code {int(cap.exit_code)} "
                                     "before running any checks")
     if cap.config is not None:
@@ -434,11 +464,19 @@ def _build_report(project, cap, pre_stdout="") -> Report:
     rep.stdout = stdout.rstrip("\n")
     rep.traceback = cap.traceback
     rep.exc_info = cap.exc_info
+    pre = pre_stdout or ""
+    rep.output = pre + ("\n" if pre and not pre.endswith("\n") else "") + cap.pytest_output
     return rep
 
 
+def _refuse_nice_and_raw(nice, raw):
+    if nice and raw:
+        raise ValueError("nice and raw cannot be combined: raw shows pytest's own "
+                         "output, which nice does not change")
+
+
 def run(test_path: str, *, project: str = "", failfast: bool = True,
-        solution: bool | str = False, nice: bool = False) -> Report:
+        solution: bool | str = False, nice: bool = False, raw: bool = False) -> Report:
     """Run ``test_path`` against the student's ``<project>.py`` in the cwd.
 
     With ``solution=True`` the reference ``<project>_solution.py`` is run
@@ -448,7 +486,11 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
     With ``nice=True`` a failed ``assert module.f(...) == value`` is explained as
     "f(...) should return <value> but returns <what it returned>" instead of
     pytest's diff.
+
+    With ``raw=True`` the report's ``output`` is pytest's own, coloured output,
+    as ``pytest -v test_<project>.py`` prints it.
     """
+    _refuse_nice_and_raw(nice, raw)
     project = project or _plugin.student_module_name(os.path.basename(test_path).rsplit(".", 1)[0])
     suffix = _plugin.SOLUTION_SUFFIX if solution is True else (solution or "")
 
@@ -481,7 +523,7 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
         _plugin._INJECTED[project] = module
     try:
         cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, suffix,
-                          nice=nice)
+                          nice=nice, raw=raw)
     finally:
         if not already_injected:
             _plugin._INJECTED.pop(project, None)
@@ -489,7 +531,8 @@ def run(test_path: str, *, project: str = "", failfast: bool = True,
 
 
 def run_injected(project: str, module: types.ModuleType, test_path: str | None = None, *,
-                 pre_stdout: str = "", failfast: bool = True, nice: bool = False) -> Report:
+                 pre_stdout: str = "", failfast: bool = True, nice: bool = False,
+                 raw: bool = False) -> Report:
     """Run against an in-notebook module built by the ``%%test`` cell magic.
 
     ``test_path`` is a test file, or a folder whose ``test_*.py`` files are all
@@ -501,11 +544,15 @@ def run_injected(project: str, module: types.ModuleType, test_path: str | None =
     With ``nice=True`` (``%%test <project> --nice``) a failed
     ``assert module.f(...) == value`` is explained as "f(...) should return
     <value> but returns <what it returned>" instead of pytest's diff.
+
+    With ``raw=True`` (``%%test <project> --raw``) the report's ``output`` is
+    pytest's own, coloured ``pytest -v`` output, after ``pre_stdout``.
     """
+    _refuse_nice_and_raw(nice, raw)
     _plugin._INJECTED_FOR_ALL = module
     try:
         cap = _run_pytest(test_path, getattr(module, "__file__", None), failfast, nice=nice,
-                          cell=module if test_path is None else None)
+                          cell=module if test_path is None else None, raw=raw)
     finally:
         _plugin._INJECTED_FOR_ALL = None
     return _build_report(project, cap, pre_stdout=pre_stdout)

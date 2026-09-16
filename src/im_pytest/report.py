@@ -44,6 +44,9 @@ class Report:
     # (type, value, traceback) of that error, the traceback starting at the
     # student's own code where it passes through it
     exc_info: Optional[Any] = field(default=None, repr=False, compare=False)
+    # what a terminal would have shown: the code's own prints while it loaded,
+    # then pytest's output (for raw=True coloured, as `pytest -v` prints it)
+    output: str = field(default="", repr=False)
 
     @property
     def passed(self) -> int:

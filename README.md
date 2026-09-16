@@ -25,7 +25,10 @@ im_pytest.check("translationproject")   # friendly panel: ✓/✗ per function
 2. **Raw pytest** — `pytest test_translationproject.py`. The *same* file, now run
    with the real tool so students learn to read pytest's output. The `module`
    fixture, the `requires` marker and the not-defined banner are provided
-   automatically (this package registers a `pytest11` plugin).
+   automatically (this package registers a `pytest11` plugin). In a notebook,
+   `%%test translationproject --raw` or `check("translationproject", raw=True)`
+   shows the same coloured output `pytest -v` prints, in place of the panel
+   (not together with `--nice`).
 3. **Student-authored** — students write their own `assert`-based tests to
    specify and validate AI-produced code, using the provided files as the model.
    A `%%test` cell with no argument runs the `test_...` functions written in the

@@ -5,6 +5,7 @@ folder (never nesting ``pytest.main`` in the outer run), with the widget swapped
 for a list the reports land in.
 """
 import json
+import re
 import subprocess
 import sys
 
@@ -17,7 +18,7 @@ import im_pytest.widget as widget
 ip = InteractiveShell.instance()
 widget.register_test_magic(ip)
 reports = []
-widget._show = reports.append
+widget._show = lambda report, raw=False: reports.append(report)
 printed = io.StringIO()
 with contextlib.redirect_stdout(printed):
     ip.run_cell_magic("test", sys.argv[1], sys.argv[2])
@@ -195,7 +196,8 @@ def test_a_cell_without_tests(tmp_path):
 # showtraceback swapped for recorders: what was drawn, and what error went to
 # IPython -- with each frame's label as IPython's tracebacks print it.
 _SHOW_SNIPPET = '''
-import contextlib, io, json, sys, traceback
+import contextlib, io, json, os, sys, traceback
+start = os.getcwd()
 from IPython.core.interactiveshell import InteractiveShell
 import im_pytest.widget as widget
 ip = InteractiveShell.instance()
@@ -221,6 +223,7 @@ printed = io.StringIO()
 with contextlib.redirect_stdout(printed):
     result = ip.run_cell(sys.argv[1], store_history=True)
 print(json.dumps({"shown": shown, "printed": printed.getvalue(),
+                  "cwd_kept": os.getcwd() == start,
                   "magic_raised": repr(result.error_in_exec or result.error_before_exec)}))
 '''
 
@@ -231,6 +234,9 @@ def _typed(cwd, source):
     assert proc.returncode == 0, proc.stderr
     d = json.loads(proc.stdout.strip().splitlines()[-1])
     assert d["magic_raised"] == "None"          # nothing escaped the magic itself
+    # pytest chdirs back to where it thinks it started when a run ends; telling
+    # it the wrong place once left the kernel in a deleted temp folder
+    assert d["cwd_kept"]
     return d
 
 
@@ -278,3 +284,73 @@ def test_a_cell_that_does_not_compile(tmp_path):
     r = _only_report(_magic(tmp_path, "", cell="def f(x):\n    return x +\n\ndef test_f():\n    pass\n"))
     assert r["import_error"].startswith("SyntaxError") and "<cell>" in r["import_error"]
     assert r["outcomes"] == {} and r["traceback"]
+
+
+# --- --raw: pytest's own output -------------------------------------------- #
+
+_PROJECT_TEST = ("def test_passes(module):\n    assert module.f(1) == 2\n\n"
+                 "def test_raises(module):\n    assert module.f('a') == 'b'\n")
+
+
+def test_raw_shows_pytests_own_output_instead_of_the_widget(tmp_path):
+    (tmp_path / "test_proj.py").write_text(_PROJECT_TEST)
+    d = _typed(tmp_path, "%%test proj --raw\nprint('loading')\ndef f(x):\n    return x + 1\n")
+    # no widget, and the error in the test is in pytest's output, not shown again
+    assert d["shown"] == []
+    out = d["printed"]
+    assert "\x1b[" in out                                   # in colour
+    text = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert text.startswith("loading\n")                     # the code's prints first
+    # as `pytest -v` prints it: a line per test
+    for expected in ("test session starts", "test_proj.py::test_passes PASSED",
+                     "test_proj.py::test_raises FAILED", "FAILURES",
+                     "TypeError", "FAILED test_proj.py::test_raises",
+                     "1 failed, 1 passed"):
+        assert expected in text, expected
+    # plumbing is left out: the header lines, and the warning that im_pytest was
+    # imported before pytest started
+    assert "rootdir:" not in text and "configfile:" not in text
+    assert "warnings summary" not in text
+
+
+def test_raw_for_a_cell_with_its_own_tests(tmp_path):
+    cell = "%%test --raw\ndef f(x):\n    return x + 1\n\ndef test_f():\n    assert [f(1)] == [3]\n"
+    text = re.sub(r"\x1b\[[0-9;]*m", "", _typed(tmp_path, cell)["printed"])
+    # named from its temp folder, not "../../../var/folders/.../test_cell.py"
+    assert "\ntest_cell.py::test_f FAILED" in text and "FAILED test_cell.py::test_f" in text
+    assert "../" not in text
+    # -v: pytest's full diff, where the default verbosity says "Use -v to get more diff"
+    assert "Full diff:" in text and "Use -v" not in text
+
+
+def test_raw_still_shows_an_error_before_pytest_ran_as_python_would(tmp_path):
+    d = _typed(tmp_path, "%%test --raw\ndef f(x):\n    return x +\n")
+    assert d["printed"] == ""
+    assert [part["error"] for part in d["shown"]] == ["SyntaxError"]
+
+
+def test_raw_and_nice_together_are_refused(tmp_path):
+    (tmp_path / "test_proj.py").write_text(_PROJECT_TEST)
+    d = _typed(tmp_path, "%%test proj --raw --nice\ndef f(x):\n    return x\n")
+    assert d["shown"] == [] and "--nice and --raw cannot be used together" in d["printed"]
+
+
+def test_check_raw(tmp_path):
+    (tmp_path / "test_proj.py").write_text(_PROJECT_TEST)
+    (tmp_path / "proj.py").write_text("def f(x):\n    return x + 1\n")
+    snippet = ("from im_pytest import check, run\n"
+               "check('proj', raw=True)\n"
+               "r = run('test_proj.py', project='proj', raw=True)\n"
+               "print('MESSAGES', [o.message for o in r.outcomes])\n"
+               "try:\n    check('proj', raw=True, nice=True)\n"
+               "except ValueError as exc:\n    print('REFUSED', exc)\n")
+    proc = subprocess.run([sys.executable, "-c", snippet], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "\x1b[" in proc.stdout
+    text = re.sub(r"\x1b\[[0-9;]*m", "", proc.stdout)
+    assert "test session starts" in text and "FAILED test_proj.py::test_raises" in text
+    # the report's own messages stay plain text, even from a coloured run
+    messages = text.split("MESSAGES", 1)[1]
+    assert "\\x1b" not in messages and "raised TypeError" in messages
+    assert "REFUSED nice and raw cannot be combined" in text

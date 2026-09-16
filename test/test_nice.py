@@ -124,7 +124,7 @@ import im_pytest.widget as widget
 ip = InteractiveShell.instance()
 widget.register_test_magic(ip)
 reports = []
-widget._show = reports.append
+widget._show = lambda report, raw=False: reports.append(report)
 printed = io.StringIO()
 with contextlib.redirect_stdout(printed):
     ip.run_cell_magic("test", sys.argv[1], sys.argv[2])
@@ -216,7 +216,7 @@ def test_magic_without_the_flag_is_unchanged(tmp_path):
 def test_magic_refuses_what_it_does_not_understand(tmp_path, line):
     d = _python(tmp_path, _MAGIC_SNIPPET, line, _CELL)
     assert d["reports"] == []
-    assert d["printed"].strip() == "Usage: %%test [<project> | <test file> | <folder>] [--nice]"
+    assert d["printed"].strip() == "Usage: %%test [<project> | <test file> | <folder>] [--nice | --raw]"
 
 
 # check() and pytest-check read the student's shapes.py from the working folder
