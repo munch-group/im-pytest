@@ -33,12 +33,10 @@ a ~400-line per-file `unittest` harness from the old course.
   `%%exercise` output), plus `check()` and the `%%test` cell magic. Auto-registers
   the magic on import. The widget shows a **TESTS - <where>** card (✓/✗ per
   function; `<where>` is `Report.tests_from`: the project, a test file's or
-  folder's name, "current folder" or "this cell") and,
-  only when the student's code printed, a **Terminal output** card with their
-  prints — mirroring the `%%exercise` widget. An error the code raised is *not*
-  in a card: `_show` hands it to `ip.showtraceback`, so it is an ordinary error
-  output under the widget (and, when the code could not run at all, the only
-  output after its prints).
+  folder's name, "current folder" or "this cell"). Nothing else is in a card:
+  `_show` prints what the code printed under the widget and hands an error it
+  raised to `ip.showtraceback`, so both look as they would without `%%test`
+  (and, when the code could not run at all, they are the only output).
 - `cli.py` — the `pytest-check` console entry point, including `--solution`,
   `--nice` and the `--sweep <dir>` pre-term check over every project.
 - `resources.py` — locate `test_<project>.py` (working folder or `IM_PROJECT_TESTS`),
@@ -57,7 +55,8 @@ a ~400-line per-file `unittest` harness from the old course.
   `FAIL` check; any other exception is an `ERROR` check. Its traceback, cut to
   start at the student's code (`runner.student_traceback`), is kept twice on the
   `Report`: as `exc_info` for IPython to show in a notebook, and as text
-  (`runner.format_traceback`) for the CLI. Captured prints go to the widget.
+  (`runner.format_traceback`) for the CLI, which still has a terminal-output
+  section. Captured prints are printed under the widget, not drawn in it.
 - **An error looks as it would without `%%test`.** `_show` calls
   `ip.showtraceback(exc_info, tb_offset=0)` — `tb_offset=0` because IPython
   otherwise drops the first frame, which in its own cells is its runner but here

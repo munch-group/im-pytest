@@ -1,16 +1,13 @@
 """The notebook front door: the ``check()`` function and the ``%%test`` magic,
 rendered as an anywidget styled like ``script-widget``'s ``%%exercise`` output.
 
-The widget has up to two cards:
+The widget is one card, **TESTS - <where the tests came from>**: a ✓/✗ row per
+tested function, with the failing assertion, a "not defined yet" note, and a
+summary line.
 
-* **TESTS - <where the tests came from>** — one ✓/✗ row per tested function,
-  with the failing assertion, a "not defined yet" note, and a summary line.
-* **Terminal output** — shown only when the student's code printed something;
-  it shows their prints, like the ``%%exercise`` widget.
-
-An error the student's code raised is not drawn in a card. IPython shows it below
-the widget as an ordinary error output -- the same traceback, looking the same,
-as the code would give run without ``%%test``.
+Nothing else is drawn in a card. What the student's code printed is printed under
+the widget, and an error it raised is shown there by IPython -- both exactly as
+they would look run without ``%%test``.
 """
 from __future__ import annotations
 
@@ -43,39 +40,6 @@ __all__ = ["TestResultWidget", "check", "register_test_magic"]
 
 
 _ESM = r"""
-const ANSI_16 = [
-  "#3e424d","#e75c58","#00a250","#ddb62b","#208ffb","#d160c4","#60c6c8","#c5c1b4",
-  "#282c36","#b22b31","#007427","#b27d12","#0065ca","#a03196","#258f8f","#a1a6b2"];
-function rgbToHex(r,g,b){return "#"+[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");}
-function xterm256(n){
-  if(n<16)return ANSI_16[n];
-  if(n<232){n-=16;const L=[0,95,135,175,215,255];return rgbToHex(L[Math.floor(n/36)],L[Math.floor((n%36)/6)],L[n%6]);}
-  const g=8+(n-232)*10;return rgbToHex(g,g,g);}
-function applySGR(s,c){for(let i=0;i<c.length;i++){const k=c[i];
-  if(k===0){s.fg=s.bg=null;s.bold=s.italic=s.underline=false;}
-  else if(k===1)s.bold=true;else if(k===22)s.bold=false;
-  else if(k===3)s.italic=true;else if(k===23)s.italic=false;
-  else if(k===4)s.underline=true;else if(k===24)s.underline=false;
-  else if(k===39)s.fg=null;else if(k===49)s.bg=null;
-  else if(k>=30&&k<=37)s.fg=ANSI_16[k-30];else if(k>=90&&k<=97)s.fg=ANSI_16[8+k-90];
-  else if(k>=40&&k<=47)s.bg=ANSI_16[k-40];else if(k>=100&&k<=107)s.bg=ANSI_16[8+k-100];
-  else if(k===38||k===48){const m=c[i+1];let col=null;
-    if(m===5){col=xterm256(c[i+2]);i+=2;}else if(m===2){col=rgbToHex(c[i+2],c[i+3],c[i+4]);i+=4;}
-    if(k===38)s.fg=col;else s.bg=col;}}}
-function ansiToHtml(text){
-  const frag=document.createDocumentFragment();
-  const s={fg:null,bg:null,bold:false,italic:false,underline:false};
-  const re=/\x1b\[([0-9;]*)m/g;let last=0,m;
-  function flush(chunk){if(!chunk)return;
-    if(s.fg||s.bg||s.bold||s.italic||s.underline){const sp=document.createElement("span");
-      if(s.fg)sp.style.color=s.fg;if(s.bg)sp.style.backgroundColor=s.bg;
-      if(s.bold)sp.style.fontWeight="bold";if(s.italic)sp.style.fontStyle="italic";
-      if(s.underline)sp.style.textDecoration="underline";sp.textContent=chunk;frag.appendChild(sp);}
-    else frag.appendChild(document.createTextNode(chunk));}
-  while((m=re.exec(text))!==null){flush(text.slice(last,m.index));last=re.lastIndex;
-    applySGR(s,m[1].length?m[1].split(";").map(Number):[0]);}
-  flush(text.slice(last));return frag;}
-
 function fillAncestors(el){let a=el;for(let i=0;i<4&&a;i++){a.style.width="100%";a.style.boxSizing="border-box";a=a.parentElement;}}
 
 function card(title,keepCase){
@@ -115,16 +79,6 @@ function render({model, el}){
   summary.textContent=model.get("summary")||"";
   body.appendChild(summary);
   wrap.appendChild(root);
-
-  // ---- terminal-output card (like %%exercise) ----
-  const stdout=model.get("stdout")||"";
-  const tb=model.get("traceback")||"";
-  if(stdout||tb){
-    const term=card("Terminal output:");
-    if(stdout){const pre=document.createElement("pre");pre.className="imp-term";pre.appendChild(ansiToHtml(stdout));term.body.appendChild(pre);}
-    if(tb){const pre=document.createElement("pre");pre.className="imp-term imp-tb";pre.appendChild(ansiToHtml(tb));term.body.appendChild(pre);}
-    wrap.appendChild(term.root);
-  }
   el.appendChild(wrap);
 }
 export default { render };
@@ -152,9 +106,6 @@ _CSS = r"""
 .imp-undef b { color:#b26a1f; }
 .imp-undef-note { margin-top:4px; font-size:12px; }
 .imp-summary { margin-top:10px; padding-top:8px; border-top:1px solid #eee; font-weight:600; }
-.imp-term { margin:0; font-family:ui-monospace,SFMono-Regular,"Cascadia Code",Menlo,monospace;
-  font-size:12.5px; line-height:18px; white-space:pre-wrap; word-break:break-word; color:#24292f; }
-.imp-body > .imp-term + .imp-term { margin-top:8px; }
 """
 
 
@@ -168,8 +119,6 @@ class TestResultWidget(anywidget.AnyWidget):
     undefined = traitlets.List(traitlets.Unicode()).tag(sync=True)
     summary = traitlets.Unicode("").tag(sync=True)
     ok = traitlets.Bool(True).tag(sync=True)
-    stdout = traitlets.Unicode("").tag(sync=True)
-    traceback = traitlets.Unicode("").tag(sync=True)
 
     def __init__(self, report: Report):
         # Work the report out into locals first, then hand the whole lot to
@@ -196,7 +145,7 @@ class TestResultWidget(anywidget.AnyWidget):
             ok = False
         elif report.import_error is not None:
             results = [{"name": report.import_error, "status": ERROR,
-                        "message": "Your code could not be run — see the terminal output below."}]
+                        "message": "Your code could not be run — see the error below."}]
             summary = "Fix the error below, then run the checks again."
             ok = False
         else:
@@ -218,9 +167,6 @@ class TestResultWidget(anywidget.AnyWidget):
             summary=summary,
             ok=ok,
             undefined=list(report.undefined),
-            stdout=report.stdout,
-            # an error with exc_info is shown by IPython, under the widget (_show)
-            traceback=report.traceback if report.exc_info is None else "",
         )
 
 
@@ -231,12 +177,14 @@ def _show(report: Report, raw: bool = False) -> None:
     a screenful of dataclass fields and escaped ANSI codes below the friendly
     output the widget just drew. Anyone who wants the object calls ``run()``.
 
-    An error in the student's code goes to IPython's own ``showtraceback``, so it
-    appears under the widget exactly as it would without ``%%test``: an ordinary
-    error output, not a card. When the error stopped the code running at all (a
-    syntax error, say) there are no checks, and nothing is shown but what Python
-    would show -- anything printed before the error, then the error. The cell
-    itself still completes, as it did when the error was drawn in the widget.
+    Under the widget go the code's prints, and then, through IPython's own
+    ``showtraceback``, an error it raised -- both as they would look without
+    ``%%test``, neither in a card. (A "traceback" that is a plain explanation
+    rather than an error, such as a missing solution file, is printed too.) When
+    the error stopped the code running at all (a syntax error, say) there are no
+    checks, so there is no widget either: what is shown is what Python would show,
+    the prints and then the error. The cell itself still completes, as it did when
+    these were drawn in the widget.
 
     With ``raw`` there is no widget: what is shown is what a terminal would show,
     the code's prints and then pytest's own coloured output, errors in the tests
@@ -254,12 +202,14 @@ def _show(report: Report, raw: bool = False) -> None:
     except Exception:  # pragma: no cover
         print(report.to_text())
         return
-    if could_not_run and report.stdout:
+    if report.stdout:
         print(report.stdout)
     if report.exc_info is not None:
         # tb_offset=0: by default IPython drops the first frame, which in a cell
         # is its own; here the traceback already starts at the student's code
         ip.showtraceback(report.exc_info, tb_offset=0)
+    elif report.traceback:
+        print(report.traceback)
 
 
 def check(project: str, *, tests: str | None = None, failfast: bool = True,

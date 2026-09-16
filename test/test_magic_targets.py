@@ -195,7 +195,7 @@ def test_a_cell_with_its_own_tests_leaves_its_names_in_the_notebook(tmp_path):
     assert not [n for n in d["names"] if not n.isidentifier()]     # no "@py_builtins"
 
 
-def test_an_error_in_a_cell_test_goes_to_the_terminal_output(tmp_path):
+def test_an_error_in_a_cell_test_is_kept_on_the_report(tmp_path):
     cell = "def f(x):\n    return x + 1\n\ndef test_raises():\n    f('a')\n"
     r = _only_report(_magic(tmp_path, "", cell=cell))
     assert r["outcomes"]["raises"][0] == "error"
@@ -221,8 +221,7 @@ import im_pytest.widget as widget
 ip = InteractiveShell.instance()
 widget.register_test_magic(ip)
 shown = []
-widget._ipy_display = lambda w: shown.append({"widget": {"traceback": w.traceback,
-                                                        "stdout": w.stdout}})
+widget._ipy_display = lambda w: shown.append({"widget": w.summary})
 
 def label(filename, lineno):
     named = ip.compile.format_code_name(filename)
@@ -277,8 +276,9 @@ def test_an_error_inside_a_test_comes_under_the_widget(tmp_path):
             "def test_raises():\n    print('about to fail')\n    assert f('a') == 'b'\n")
     d = _typed(tmp_path, cell)
     widget_part, error_part = d["shown"]
-    # the prints stay in the widget; the traceback does not
-    assert widget_part == {"widget": {"traceback": "", "stdout": "about to fail"}}
+    assert widget_part == {"widget": "0 passed, 1 to fix"}
+    # the print is under the widget, as printing normally is -- not in a card
+    assert d["printed"] == "about to fail\n"
     # starting at the student's code, not in pytest, with the cell's own line numbers
     assert error_part == {"error": "TypeError", "tb_offset": 0,
                           "frames": ["Cell In[1], line 7", "Cell In[1], line 3"]}
@@ -287,6 +287,25 @@ def test_an_error_inside_a_test_comes_under_the_widget(tmp_path):
 def test_a_failed_check_is_not_an_error(tmp_path):
     d = _typed(tmp_path, "%%test\ndef f(x):\n    return x\n\ndef test_f():\n    assert f(1) == 2\n")
     assert [list(part) for part in d["shown"]] == [["widget"]]
+
+
+def test_prints_come_under_the_widget(tmp_path):
+    cell = ("%%test\nprint('while defining')\ndef f(x):\n    return x + 1\n\n"
+            "def test_f():\n    print('while testing')\n    assert f(1) == 2\n")
+    d = _typed(tmp_path, cell)
+    assert [list(part) for part in d["shown"]] == [["widget"]]      # no error
+    assert d["printed"] == "while defining\nwhile testing\n"
+
+
+def test_a_missing_solution_file_is_explained_under_the_widget(tmp_path):
+    """Not every "traceback" is an error: a reference solution that is not there
+    is explained in plain words, so it is printed rather than handed to IPython
+    -- and still not drawn in a card."""
+    (tmp_path / "test_proj.py").write_text("def test_x(module):\n    pass\n")
+    (tmp_path / "proj.py").write_text("def f(x):\n    return x\n")
+    d = _typed(tmp_path, "import im_pytest\nim_pytest.check('proj', solution=True)\n")
+    assert [list(part) for part in d["shown"]] == [["widget"]]      # no error
+    assert "proj_solution.py" in d["printed"] and "in this folder" in d["printed"]
 
 
 def test_check_shows_an_error_in_the_students_file_the_same_way(tmp_path):

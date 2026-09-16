@@ -63,8 +63,7 @@ def test_report_is_populated_before_the_comm_opens(name, captured):
     report = REPORTS[name]
     w = ResultWidget(report)
 
-    for trait in ("project", "tests_from", "results", "summary", "ok",
-                  "undefined", "stdout", "traceback"):
+    for trait in ("project", "tests_from", "results", "summary", "ok", "undefined"):
         assert captured[trait] == getattr(w, trait), f"{trait} missing from comm_open"
 
     assert captured["results"], "the checks themselves did not ride in comm_open"
@@ -78,22 +77,14 @@ def test_ok_is_not_left_at_its_default_when_the_run_failed(captured):
     assert captured["ok"] is False
 
 
-def test_an_error_with_exc_info_is_not_drawn_in_the_widget():
-    """IPython shows it under the widget as an ordinary error output (see
-    ``_show``); the widget keeps the prints, and a traceback with nothing to
-    show natively -- a plain explanation -- stays in the card."""
-    try:
-        raise TypeError("boom")
-    except TypeError as exc:
-        exc_info = (TypeError, exc, exc.__traceback__)
-    shown = ResultWidget(Report(project="p", outcomes=[Outcome("g", FAIL, "raised")],
-                                stdout="hello", traceback="TypeError: boom",
-                                exc_info=exc_info))
-    assert shown.traceback == "" and shown.stdout == "hello"
-
-    explained = ResultWidget(Report(project="p", import_error="No file named x.py",
-                                    traceback="No file named x.py was found here"))
-    assert explained.traceback == "No file named x.py was found here"
+def test_prints_and_errors_are_not_in_the_widget():
+    """Both go under it, printed and shown by IPython (see ``_show``), so the
+    widget carries neither -- and its only card is the checks."""
+    w = ResultWidget(Report(project="p", outcomes=[Outcome("g", FAIL, "raised")],
+                            stdout="hello", traceback="TypeError: boom"))
+    assert not w.has_trait("stdout") and not w.has_trait("traceback")
+    from im_pytest.widget import _CSS, _ESM
+    assert "Terminal output" not in _ESM and "imp-term" not in _ESM + _CSS
 
 
 def test_the_header_names_where_the_tests_came_from():
@@ -126,9 +117,9 @@ console.log(JSON.stringify(headers));
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 def test_the_header_as_rendered(tmp_path):
-    """The widget's own render(), run under node with a minimal DOM: "TESTS - "
-    and the name, which keeps its case (a file name is case-sensitive) while
-    the terminal-output card's header is still upper-cased by the CSS."""
+    """The widget's own render(), run under node with a minimal DOM: one card,
+    headed "TESTS - " and the name, which keeps its case (a file name is
+    case-sensitive) where the CSS would otherwise upper-case it."""
     import json
     import subprocess
     from im_pytest.widget import _CSS, _ESM
@@ -139,8 +130,7 @@ def test_the_header_as_rendered(tmp_path):
     proc = subprocess.run(["node", str(tmp_path / "render.mjs"), str(tmp_path / "widget.mjs"),
                            json.dumps(w.get_state())], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout) == [["imp-header imp-keep-case", "TESTS - test_X.py"],
-                                       ["imp-header", "Terminal output:"]]
+    assert json.loads(proc.stdout) == [["imp-header imp-keep-case", "TESTS - test_X.py"]]
     assert ".imp-header.imp-keep-case { text-transform:none; }" in _CSS
 
 
